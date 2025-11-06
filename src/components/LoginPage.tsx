@@ -7,16 +7,16 @@ import { Alert, AlertDescription } from './ui/alert';
 import { ShieldCheck, AlertCircle } from 'lucide-react';
 import { User } from '../types';
 import { createClient } from '../utils/supabase/client';
+import { useAuth } from '../contexts/AuthContext';
+import { useNavigate } from 'react-router-dom';
 
-interface LoginPageProps {
-  onLogin: (user: User) => void;
-}
-
-export function LoginPage({ onLogin }: LoginPageProps) {
+export function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const { login } = useAuth();
+  const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -95,10 +95,8 @@ export function LoginPage({ onLogin }: LoginPageProps) {
         createdAt: new Date(usuariosAny.created_at),
       };
 
-      // Guardar usuario en localStorage para persistencia
-      localStorage.setItem('currentUser', JSON.stringify(user));
-      
-      // Crear registro de auditoría: login exitoso (best-effort)
+      // Use AuthContext to set session without reloading
+      login(user);
       try {
         const { createAuditLog } = await import('../lib/api');
         await createAuditLog({
@@ -112,7 +110,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
       }
 
       console.log('✅ Login exitoso:', user.fullName, `(${user.role})`);
-      onLogin(user);
+      navigate('/');
       
     } catch (err: any) {
       console.error('Login error:', err);

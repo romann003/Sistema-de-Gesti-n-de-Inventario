@@ -40,6 +40,21 @@ export interface InventoryMovement {
   notes?: string;
   customerId?: string;
   customerName?: string;
+  // Optional enriched fields (may come from different API shapes)
+  performedByName?: string;
+  proveedor?: string | { id?: string; name?: string } | null;
+  cliente?: any;
+  productCategory?: string | null;
+  productPrice?: number;
+  stockActual?: number;
+  stockMin?: number;
+  stockMax?: number;
+  detalles_venta?: any[];
+  // Raw payload as received from the backend (keeps original fields)
+  _raw?: any;
+  // UI helpers for expanded rows
+  _isDetail?: boolean;
+  _detailRaw?: any;
 }
 
 export interface QualityMetric {

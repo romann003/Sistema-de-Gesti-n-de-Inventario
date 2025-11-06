@@ -41,6 +41,9 @@ import { projectId } from './utils/supabase/info';
 import { COMPANY } from './config/company';
 import { getProducts, getCategories, getSuppliers, getCustomers, getMovements, getSales, getAuditLogs, getUsers } from './lib/api';
 import { toast } from 'sonner';
+import { useAuth, RequireRole } from './contexts/AuthContext';
+import { NotAuthorized } from './components/NotAuthorized';
+import { useNavigate, useLocation, Routes, Route, Link } from 'react-router-dom';
 
 type Section =
   | 'dashboard'
@@ -56,7 +59,6 @@ type Section =
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [activeSection, setActiveSection] = useState<Section>('dashboard');
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [movements, setMovements] = useState<InventoryMovement[]>([]);
@@ -365,10 +367,16 @@ export default function App() {
     console.log('✅ Usuario autenticado:', user.fullName, `(${user.role})`);
   };
 
+  // Auth hooks used to properly clear context and navigate
+  const { logout } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+
   const handleLogout = async () => {
-    localStorage.removeItem('currentUser');
+    // Clear auth state and app data, then navigate to login
+    try { localStorage.removeItem('currentUser'); } catch (e) {}
     setCurrentUser(null);
-    setActiveSection('dashboard');
+    // navigation handled by router
     setProducts([]);
     setCategories([]);
     setMovements([]);
@@ -378,12 +386,38 @@ export default function App() {
     setAuditLogs([]);
     console.log('👋 Sesión cerrada correctamente');
     toast.success('Sesión cerrada correctamente');
+    try {
+      // Clear AuthContext as well so AppWrapper will redirect immediately
+      try { logout(); } catch (e) { /* ignore */ }
+      // Replace history entry and navigate to /login so back button won't return to protected pages
+      if (typeof window !== 'undefined' && window.location) {
+        window.location.replace('/login');
+      } else {
+        navigate('/login', { replace: true });
+      }
+    } catch (e) {
+      // fallback: reload to ensure state cleared
+      window.location.reload();
+    }
   };
-
-  const handleSectionChange = (section: Section) => {
-    setActiveSection(section);
-    setIsMobileMenuOpen(false);
-  };
+  
+  const currentPathSegment = location.pathname.split('/')[1] || 'dashboard';
+  const currentSection = ((): Section => {
+    switch (currentPathSegment) {
+      case 'products': return 'products';
+      case 'categories': return 'categories';
+      case 'inventory': return 'inventory';
+      case 'sales': return 'sales';
+      case 'search': return 'search';
+      case 'suppliers': return 'suppliers';
+      case 'customers': return 'customers';
+      case 'audit': return 'audit';
+      case 'users': return 'users';
+      case 'dashboard':
+      case '':
+      default: return 'dashboard';
+    }
+  })();
 
   if (isInitializing) {
     return (
@@ -421,45 +455,9 @@ export default function App() {
     );
   }
 
-  if (!currentUser) {
-    return (
-      <>
-        <LoginPage onLogin={handleLogin} />
-        {/* Button to show setup */}
-        <div className="fixed bottom-4 right-4 flex flex-col gap-2">
-          {databaseError && (
-            <Alert className="mb-2 shadow-lg">
-              <AlertCircle className="h-4 w-4" />
-              <AlertDescription className="text-xs">
-                {databaseError === 'connection_error' 
-                  ? '⚠️ Error de conexión. ¿Cambiaste de proyecto Supabase?' 
-                  : '⚠️ Base de datos no configurada'}
-              </AlertDescription>
-            </Alert>
-          )}
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowDatabaseGuide(true)}
-              className="shadow-lg bg-white hover:bg-orange-50 hover:border-orange-300"
-            >
-              <Database className="h-4 w-4 mr-2" />
-              Ayuda con Base de Datos
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowSetup(true)}
-              className="shadow-lg bg-white"
-            >
-              Configuración Inicial
-            </Button>
-          </div>
-        </div>
-      </>
-    );
-  }
+  // At this point App is rendered only for authenticated users (top-level router)
+  // so currentUser should be present. If not, render nothing.
+  if (!currentUser) return null;
 
   const navigationItems = [
     {
@@ -598,7 +596,10 @@ export default function App() {
               .filter((item) => item.available)
               .map((item, index) => {
                 const Icon = item.icon;
-                const isActive = activeSection === item.id;
+                const to = item.id === 'dashboard' ? '/' : `/${item.id}`;
+                const isActive = item.id === 'dashboard'
+                  ? (currentPathSegment === 'dashboard' || currentPathSegment === '')
+                  : currentPathSegment === item.id;
                 return (
                   <motion.div
                     key={item.id}
@@ -606,18 +607,16 @@ export default function App() {
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ duration: 0.3, delay: index * 0.05 }}
                   >
-                    <Button
-                      variant={isActive ? 'default' : 'ghost'}
-                      className={`w-full justify-start rounded-lg transition-all duration-200 ${
-                        isActive
-                          ? 'bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 shadow-md'
-                          : 'hover:bg-gray-100'
-                      }`}
-                      onClick={() => handleSectionChange(item.id)}
+                    <Link
+                      to={to}
+                      className={`w-full block rounded-lg no-underline ${isActive ? 'shadow-md' : 'hover:bg-gray-100'}`}
+                      onClick={() => setIsMobileMenuOpen(false)}
                     >
-                      <Icon className="h-4 w-4 mr-2" />
-                      {item.label}
-                    </Button>
+                      <div className={`flex items-center gap-2 px-3 py-2 ${isActive ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white' : 'text-gray-800'}`}>
+                        <Icon className={`h-4 w-4 ${isActive ? 'text-white' : 'text-gray-600'}`} />
+                        <span className={isActive ? 'text-white font-semibold' : ''}>{item.label}</span>
+                      </div>
+                    </Link>
                   </motion.div>
                 );
               })}
@@ -638,97 +637,33 @@ export default function App() {
         {/* Main Content */}
         <main className="flex-1 p-4 lg:p-8">
           <motion.div
-            key={activeSection}
+            key={currentSection}
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.4 }}
           >
-            {activeSection === 'dashboard' && (
-              <EnhancedDashboard
-                products={products}
-                movements={movements}
-                qualityMetrics={mockQualityMetrics}
-                sales={sales}
-              />
-            )}
-            {activeSection === 'products' && (
-              <ProductsManagement
-                products={products}
-                categories={categories}
-                suppliers={suppliers}
-                onProductsChange={setProducts}
-                onCategoriesChange={setCategories}
-              />
-            )}
-            {activeSection === 'categories' && (
-              <CategoriesManagement
-                categories={categories}
-                onCategoriesChange={setCategories}
-              />
-            )}
-            {activeSection === 'inventory' && (
-              <InventoryManagement
-                products={products}
-                suppliers={suppliers}
-                movements={movements}
-                currentUser={currentUser}
-                onProductsChange={setProducts}
-                onMovementsChange={setMovements}
-              />
-            )}
-            {activeSection === 'search' && (
-              <AdvancedSearch
-                products={products}
-                // Pasamos el array completo de proveedores para mostrar detalles en la vista
-                suppliers={suppliers}
-                categories={categoryNames}
-              />
-            )}
-            
-            {activeSection === 'suppliers' && (
-              <SuppliersManagement
-                suppliers={suppliers}
-                onSuppliersChange={setSuppliers}
-              />
-            )}
-            {activeSection === 'customers' && (
-              <CustomersAndSales
-                customers={customers}
-                sales={sales}
-                products={products}
-                currentUserName={currentUser.fullName}
-                currentUser={currentUser}
-                onCustomersChange={setCustomers}
-                onSalesChange={setSales}
-                onProductsChange={setProducts}
-                onMovementsChange={setMovements}
-                movements={movements}
-                showOnly={"customers"}
-              />
-            )}
-            {activeSection === 'sales' && (
-              <CustomersAndSales
-                customers={customers}
-                sales={sales}
-                products={products}
-                currentUserName={currentUser.fullName}
-                currentUser={currentUser}
-                onCustomersChange={setCustomers}
-                onSalesChange={setSales}
-                onProductsChange={setProducts}
-                onMovementsChange={setMovements}
-                movements={movements}
-                showOnly={"sales"}
-              />
-            )}
-            {activeSection === 'audit' && <AuditLog auditLogs={auditLogs} />}
-            {activeSection === 'users' && (
-              <UsersManagement
-                users={users}
-                currentUser={currentUser}
-                onUsersChange={setUsers}
-              />
-            )}
+            <Routes>
+              <Route index element={<EnhancedDashboard products={products} movements={movements} qualityMetrics={mockQualityMetrics} sales={sales} />} />
+              <Route path="dashboard" element={<EnhancedDashboard products={products} movements={movements} qualityMetrics={mockQualityMetrics} sales={sales} />} />
+              <Route path="products" element={<ProductsManagement products={products} categories={categories} suppliers={suppliers} onProductsChange={setProducts} onCategoriesChange={setCategories} />} />
+              <Route path="categories" element={<CategoriesManagement categories={categories} onCategoriesChange={setCategories} />} />
+              <Route path="inventory" element={<InventoryManagement products={products} suppliers={suppliers} movements={movements} currentUser={currentUser} onProductsChange={setProducts} onMovementsChange={setMovements} />} />
+              <Route path="search" element={<AdvancedSearch products={products} suppliers={suppliers} categories={categoryNames} />} />
+              <Route path="suppliers" element={<SuppliersManagement suppliers={suppliers} onSuppliersChange={setSuppliers} />} />
+              <Route path="customers" element={<CustomersAndSales customers={customers} sales={sales} products={products} currentUserName={currentUser.fullName} currentUser={currentUser} onCustomersChange={setCustomers} onSalesChange={setSales} onProductsChange={setProducts} onMovementsChange={setMovements} movements={movements} showOnly={"customers"} />} />
+              <Route path="sales" element={<CustomersAndSales customers={customers} sales={sales} products={products} currentUserName={currentUser.fullName} currentUser={currentUser} onCustomersChange={setCustomers} onSalesChange={setSales} onProductsChange={setProducts} onMovementsChange={setMovements} movements={movements} showOnly={"sales"} />} />
+              <Route path="audit" element={
+                <RequireRole roles={["Administrador"]}>
+                  <AuditLog auditLogs={auditLogs} />
+                </RequireRole>
+              } />
+              <Route path="users" element={
+                <RequireRole roles={["Administrador"]}>
+                  <UsersManagement users={users} currentUser={currentUser} onUsersChange={setUsers} />
+                </RequireRole>
+              } />
+              <Route path="not-authorized" element={<NotAuthorized />} />
+            </Routes>
           </motion.div>
         </main>
       </div>

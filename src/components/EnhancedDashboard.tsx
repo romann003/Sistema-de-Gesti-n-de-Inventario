@@ -14,6 +14,7 @@ import {
   ShoppingCart,
   BarChart3,
 } from 'lucide-react';
+import React from 'react';
 import { Product, InventoryMovement, QualityMetric, Sale } from '../types';
 import { motion } from 'motion/react';
 import {
@@ -47,67 +48,138 @@ export function EnhancedDashboard({
   qualityMetrics,
   sales,
 }: EnhancedDashboardProps) {
-  const lowStockProducts = products.filter((p) => p.currentStock <= p.minStock);
-  const totalValue = products.reduce((sum, p) => sum + p.currentStock * p.unitPrice, 0);
-  const todayMovements = movements.filter(
-    (m) => m.date.toDateString() === new Date().toDateString()
-  );
-  const totalSales = sales.reduce((sum, s) => sum + s.total, 0);
+  // debug toggle removed per request
+  // Normalize and coerce numeric fields to avoid NaN or string issues
+  const safeNumber = (v: any) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  const getProductField = (p: any, keys: string[]) => {
+    for (const k of keys) {
+      if (p == null) continue;
+      if (k in p && p[k] != null) return p[k];
+      // also try nested raw payload
+      if (p._raw && k in p._raw && p._raw[k] != null) return p._raw[k];
+    }
+    return undefined;
+  };
+
+  const getCurrentStock = (p: any) => safeNumber(getProductField(p, ['currentStock', 'current_stock', 'stock_actual', 'stock']) ?? p.currentStock ?? 0);
+  const getMinStock = (p: any) => safeNumber(getProductField(p, ['minStock', 'min_stock', 'stock_minimo', 'stockMin']) ?? p.minStock ?? 0);
+  const getUnitPrice = (p: any) => safeNumber(getProductField(p, ['unitPrice', 'unit_price', 'precio', 'price']) ?? p.unitPrice ?? 0);
+
+  const getMovementProductId = (m: any) => {
+    return (m.productId ?? m.id_producto ?? m._raw?.id_producto ?? m._raw?.productos?.id_producto ?? null);
+  };
+
+  const lowStockProducts = products.filter((p) => getCurrentStock(p) <= getMinStock(p));
+  const totalValue = products.reduce((sum, p) => sum + getCurrentStock(p) * getUnitPrice(p), 0);
+  const todayMovements = movements.filter((m) => {
+    try {
+      const d = m.date instanceof Date ? m.date : new Date(m.date);
+      return d.toDateString() === new Date().toDateString();
+    } catch (e) {
+      return false;
+    }
+  });
+  const totalSales = sales.reduce((sum, s) => sum + safeNumber(s.total), 0);
 
   // Datos para gráfico de categorías
-  const categoriesData = Array.from(new Set(products.map((p) => p.category))).map(
-    (category) => {
-      const categoryProducts = products.filter((p) => p.category === category);
-      return {
-        name: category,
-        cantidad: categoryProducts.length,
-        valor: categoryProducts.reduce((sum, p) => sum + p.currentStock * p.unitPrice, 0),
-      };
-    }
-  );
+  const categoriesData = Array.from(new Set(products.map((p) => p.category))).map((category) => {
+    const categoryProducts = products.filter((p) => p.category === category);
+    return {
+      name: category,
+      cantidad: categoryProducts.length,
+      valor: categoryProducts.reduce((sum, p) => sum + getCurrentStock(p) * getUnitPrice(p), 0),
+    };
+  });
 
   // Productos más vendidos
   const productSales = new Map<string, number>();
+  // Sum quantities sold by productId (fallback to name when id missing)
   movements
-    .filter((m) => m.type === 'salida')
+    .filter((m) => (m.type || '').toString().toLowerCase() === 'salida')
     .forEach((m) => {
-      productSales.set(m.productName, (productSales.get(m.productName) || 0) + m.quantity);
+      const qty = safeNumber((m as any).quantity ?? (m as any).cantidad ?? 0);
+      const pid = getMovementProductId(m);
+      const key = pid ? String(pid) : String((m as any).productName || 'sin-nombre');
+      productSales.set(key, (productSales.get(key) || 0) + qty);
     });
 
   const topProducts = Array.from(productSales.entries())
     .sort((a, b) => b[1] - a[1])
     .slice(0, 5)
-    .map(([name, quantity]) => ({ name, quantity }));
+    .map(([key, quantity]) => {
+      // Try to resolve product name from products list when key is productId
+      const found = products.find((p) => String(p.id) === String(key));
+      return { name: found ? found.name : key, quantity };
+    });
 
   // Rotación de inventario por categoría
-  const rotationData = Array.from(new Set(products.map((p) => p.category))).map(
-    (category) => {
-      const categoryProducts = products.filter((p) => p.category === category);
-      const totalStock = categoryProducts.reduce((sum, p) => sum + p.currentStock, 0);
-      const totalSold = movements
-        .filter((m) => m.type === 'salida' && categoryProducts.some((p) => p.id === m.productId))
-        .reduce((sum, m) => sum + m.quantity, 0);
-      
-      return {
-        name: category,
-        rotacion: totalStock > 0 ? Math.round((totalSold / totalStock) * 100) : 0,
-      };
-    }
-  );
+  const rotationData = Array.from(new Set(products.map((p) => p.category))).map((category) => {
+    const categoryProducts = products.filter((p) => p.category === category);
+    const totalStock = categoryProducts.reduce((sum, p) => sum + getCurrentStock(p), 0);
+    const productIdsInCategory = new Set(categoryProducts.map((p) => String(p.id)));
+    const totalSold = movements
+      .filter((m) => (m.type || '').toString().toLowerCase() === 'salida')
+      .filter((m) => {
+        const pid = getMovementProductId(m);
+        return pid ? productIdsInCategory.has(String(pid)) : false;
+      })
+      .reduce((sum, m) => sum + safeNumber((m as any).quantity ?? (m as any).cantidad ?? 0), 0);
 
-  // Movimientos por día (últimos 7 días)
+    return {
+      name: category,
+      rotacion: totalStock > 0 ? Math.round((totalSold / totalStock) * 100) : 0,
+    };
+  });
+
+  // Quick aggregates per category used for debug validation
+  const categoryAggregates = Array.from(new Set(products.map((p) => p.category))).map((category) => {
+    const categoryProducts = products.filter((p) => p.category === category);
+    const productCount = categoryProducts.length;
+    const totalStock = categoryProducts.reduce((s, p) => s + getCurrentStock(p), 0);
+    const productIdsInCategory = new Set(categoryProducts.map((p) => String(p.id)));
+    const totalSold = movements
+      .filter((m) => (m.type || '').toString().toLowerCase() === 'salida')
+      .filter((m) => {
+        const pid = getMovementProductId(m);
+        return pid ? productIdsInCategory.has(String(pid)) : false;
+      })
+      .reduce((s, m) => s + safeNumber((m as any).quantity ?? (m as any).cantidad ?? 0), 0);
+
+    return { category, productCount, totalStock, totalSold };
+  });
+
+  // Movimientos por día (últimos 7 días) - use local date buckets so events
+  // recorded on the user's local day appear in the expected slot.
+  const toLocalDateKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+  const today = new Date();
   const last7Days = Array.from({ length: 7 }, (_, i) => {
-    const date = new Date();
-    date.setDate(date.getDate() - (6 - i));
-    return date;
+    // build local-day Date for (6 - i) days ago -> this produces an array
+    // from 6 days ago up to today
+    const dt = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    dt.setDate(dt.getDate() - (6 - i));
+    return dt;
   });
 
   const movementsByDay = last7Days.map((date) => {
-    const dayMovements = movements.filter(
-      (m) => m.date.toDateString() === date.toDateString()
-    );
-    const entradas = dayMovements.filter((m) => m.type === 'entrada').length;
-    const salidas = dayMovements.filter((m) => m.type === 'salida').length;
+    const key = toLocalDateKey(date);
+    const dayMovements = movements.filter((m) => {
+      try {
+        const raw = (m as any).date ?? (m as any).fecha ?? (m as any)._raw?.fecha ?? (m as any)._raw?.created_at ?? null;
+        const d = raw instanceof Date ? raw : raw ? new Date(raw) : null;
+        if (!d || isNaN(d.getTime())) return false;
+        return toLocalDateKey(d) === key;
+      } catch (e) {
+        return false;
+      }
+    });
+
+    const entradas = dayMovements.filter((m) => (String((m as any).type || (m as any).tipo || '').toLowerCase().includes('entrada'))).length;
+    const salidas = dayMovements.filter((m) => (String((m as any).type || (m as any).tipo || '').toLowerCase().includes('salida'))).length;
 
     return {
       dia: date.toLocaleDateString('es', { weekday: 'short' }),

@@ -253,6 +253,37 @@ export function InventoryManagement({
     } as InventoryMovement;
   };
 
+  // Try to enrich a normalized movement with local product info (name/sku)
+  const enrichMovementWithProduct = (nm: InventoryMovement) => {
+    try {
+      if ((!nm.productName || nm.productName === '') || (!nm.sku || nm.sku === '')) {
+        // Prefer matching by productId (most reliable)
+        if (nm.productId) {
+          const p = products.find((pp) => String(pp.id) === String(nm.productId));
+          if (p) return { ...nm, productName: p.name || nm.productName || '', sku: nm.sku || p.sku || '' } as InventoryMovement;
+        }
+
+        // Try matching by SKU present in the raw payload
+        const rawSku = (nm as any)._raw?.productos?.sku || (nm as any)._raw?.sku || (nm as any)._raw?.codigo || null;
+        if (rawSku) {
+          const p2 = products.find((pp) => String(pp.sku) === String(rawSku));
+          if (p2) return { ...nm, productName: p2.name || nm.productName || '', sku: String(rawSku) } as InventoryMovement;
+        }
+
+        // Try matching by product name from raw payload
+        const rawName = (nm as any)._raw?.productos?.nombre || (nm as any)._raw?.nombre_producto || (nm as any)._raw?.nombre || null;
+        if (rawName) {
+          const p3 = products.find((pp) => String(pp.name).toLowerCase() === String(rawName).toLowerCase());
+          if (p3) return { ...nm, productName: String(rawName), sku: nm.sku || p3.sku || '' } as InventoryMovement;
+        }
+      }
+    } catch (e) {
+      // ignore enrichment errors
+      console.debug('enrichMovementWithProduct error', e);
+    }
+    return nm;
+  };
+
   const getStockStatus = (product: Product) => {
     if (product.currentStock < product.minStock) {
       return { label: 'Bajo Stock', color: 'bg-yellow-100 text-yellow-800 border-yellow-300' };
@@ -267,6 +298,26 @@ export function InventoryManagement({
   // and prefer that source for rendering so the table shows entradas even
   // when the parent `movements` prop contains other data (e.g., salidas).
   const [loadedEntradas, setLoadedEntradas] = useState<InventoryMovement[] | null>(null);
+
+  // Advanced table: filters, sorting and pagination
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterType, setFilterType] = useState<'all' | 'entrada' | 'salida'>('all');
+  const [filterProduct, setFilterProduct] = useState<string>('');
+  const [filterSupplier, setFilterSupplier] = useState<string>('');
+  const [dateFrom, setDateFrom] = useState<string>('');
+  const [dateTo, setDateTo] = useState<string>('');
+  const [pageSize, setPageSize] = useState<number>(50);
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [sortBy, setSortBy] = useState<string>('date');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+
+  const toggleSort = (col: string) => {
+    if (sortBy === col) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    else {
+      setSortBy(col);
+      setSortDir('asc');
+    }
+  };
 
   const normalizedMovements = useMemo(() => {
     // If the user explicitly loaded entradas, prefer those for entrada rows
@@ -289,6 +340,104 @@ export function InventoryManagement({
   // Split movements into entradas / salidas for easier rendering
   const entradas = normalizedMovements.filter((m) => (m.type || '').toString().toLowerCase() === 'entrada');
   const salidas = normalizedMovements.filter((m) => (m.type || '').toString().toLowerCase() === 'salida');
+
+  // Client-side filtering and sorting (apply to parent movements only)
+  const filteredParents = useMemo(() => {
+    let list = normalizedMovements.slice();
+
+    // Filter by active view if tabs are used
+    if (activeView === 'entradas') list = list.filter((m) => (m.type || '').toString().toLowerCase() === 'entrada');
+    if (activeView === 'salidas') list = list.filter((m) => (m.type || '').toString().toLowerCase() === 'salida');
+
+    if (filterType !== 'all') list = list.filter((m) => (m.type || '').toString().toLowerCase() === filterType);
+
+    if (filterProduct) list = list.filter((m) => String(m.productId) === String(filterProduct));
+    if (filterSupplier) list = list.filter((m) => String(m.proveedor || m._raw?.id_proveedor || '') === String(filterSupplier));
+
+    if (dateFrom) {
+      const from = new Date(dateFrom);
+      list = list.filter((m) => new Date(m.date) >= from);
+    }
+    if (dateTo) {
+      const to = new Date(dateTo);
+      // include end of day
+      to.setHours(23, 59, 59, 999);
+      list = list.filter((m) => new Date(m.date) <= to);
+    }
+
+    if (searchTerm && searchTerm.trim()) {
+      const s = searchTerm.trim().toLowerCase();
+      list = list.filter((m) => {
+        return (
+          String(m.productName || '').toLowerCase().includes(s) ||
+          String(m.sku || '').toLowerCase().includes(s) ||
+          String(m.reason || '').toLowerCase().includes(s) ||
+          String(m.performedByName || m.performedBy || '').toLowerCase().includes(s)
+        );
+      });
+    }
+
+    // Sorting
+    list.sort((a: any, b: any) => {
+      const av = (a as any)[sortBy as keyof typeof a];
+      const bv = (b as any)[sortBy as keyof typeof b];
+      if (av == null && bv == null) return 0;
+      if (av == null) return sortDir === 'asc' ? -1 : 1;
+      if (bv == null) return sortDir === 'asc' ? 1 : -1;
+      // date comparison
+      if (sortBy === 'date') {
+        const da = new Date(a.date).getTime();
+        const db = new Date(b.date).getTime();
+        return sortDir === 'asc' ? da - db : db - da;
+      }
+      // numeric
+      if (typeof av === 'number' || typeof bv === 'number') {
+        return sortDir === 'asc' ? (Number(av) - Number(bv)) : (Number(bv) - Number(av));
+      }
+      // string
+      const sa = String(av).toLowerCase();
+      const sb = String(bv).toLowerCase();
+      if (sa < sb) return sortDir === 'asc' ? -1 : 1;
+      if (sa > sb) return sortDir === 'asc' ? 1 : -1;
+      return 0;
+    });
+
+    return list;
+  }, [normalizedMovements, activeView, filterType, filterProduct, filterSupplier, dateFrom, dateTo, searchTerm, sortBy, sortDir]);
+
+  const totalParents = filteredParents.length;
+  const totalPages = Math.max(1, Math.ceil(totalParents / pageSize));
+  useEffect(() => { if (currentPage > totalPages) setCurrentPage(1); }, [totalPages]);
+
+  // Paginate parents then expand details for display
+  const pagedParents = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredParents.slice(start, start + pageSize);
+  }, [filteredParents, currentPage, pageSize]);
+
+  const finalDisplay = useMemo(() => {
+    const expanded: InventoryMovement[] = [];
+    for (const m of pagedParents) {
+      const detalles = (m as any).detalles_venta || (m as any)._raw?.detalles_venta || (m as any)._raw?.detalles || null;
+      if (m.type === 'salida' && Array.isArray(detalles) && detalles.length > 0) {
+        expanded.push(m);
+        detalles.forEach((d: any, idx: number) => {
+          expanded.push({
+            ...m,
+            id: `${m.id}-detail-${idx}`,
+            productName: d.nombre || d.productos?.nombre || d.product_name || d.producto_nombre || '—',
+            sku: d.productos?.sku || d.sku || '—',
+            quantity: Number(d.cantidad ?? d.quantity ?? d.qty ?? 0),
+            _isDetail: true,
+            _detailRaw: d,
+          } as InventoryMovement);
+        });
+      } else {
+        expanded.push(m);
+      }
+    }
+    return expanded;
+  }, [pagedParents]);
 
   // Debug: surface counts to help diagnose missing entradas
   useEffect(() => {
@@ -372,16 +521,8 @@ export function InventoryManagement({
       const rows = await getEntradas();
       // normalize each row via local normalizer to ensure consistent shape
       let normalized = (rows || []).map((r: any) => normalizeMovement(r)).filter(Boolean) as InventoryMovement[];
-      // Ensure productName/sku are present by falling back to local products list
-      normalized = normalized.map((nm) => {
-        if ((!nm.productName || nm.productName === '') && nm.productId) {
-          const p = products.find((pp) => String(pp.id) === String(nm.productId));
-          if (p) {
-            return { ...nm, productName: p.name || '', sku: nm.sku || p.sku || '' };
-          }
-        }
-        return nm;
-      });
+      // Ensure productName/sku are present by enriching from local products list
+      normalized = normalized.map((nm) => enrichMovementWithProduct(nm));
       // Store loaded entradas locally so the UI prefers them when rendering
       setLoadedEntradas(normalized);
 
@@ -415,13 +556,7 @@ export function InventoryManagement({
       const rows = await getMovements();
       let normalized = (rows || []).map((r: any) => normalizeMovement(r)).filter(Boolean) as InventoryMovement[];
       // Enrich missing product info from local products list
-      normalized = normalized.map((nm) => {
-        if ((!nm.productName || nm.productName === '') && nm.productId) {
-          const p = products.find((pp) => String(pp.id) === String(nm.productId));
-          if (p) return { ...nm, productName: p.name || '', sku: nm.sku || p.sku || '' };
-        }
-        return nm;
-      });
+      normalized = normalized.map((nm) => enrichMovementWithProduct(nm));
       onMovementsChange(normalized);
       if (showToast) toast.success('Movimientos cargados');
       return normalized;

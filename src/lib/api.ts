@@ -309,24 +309,31 @@ export async function deleteSupplier(id: string) {
 // Products APIs
 export async function getProducts() {
   const supabase = getSupabase();
-  // Try a rich select with nested categorias; if the DB schema does not have
-  // the FK relationship declared, PostgREST may return 400. Fall back to a
-  // simple select('*') and enrich categories afterwards.
+  // Some PostgREST deployments impose a hard row limit per request (commonly 1000).
+  // To ensure we return the complete product set (e.g. >1000 rows), page through
+  // results using the range() operator. Avoid nested selects here for robustness.
+  const pageSize = 1000;
+  let allRows: any[] = [];
   let data: any[] | null = null;
-  let richSelectSucceeded = false;
   try {
-    const res = await supabase
-      .from('productos')
-      .select(`
-        *,
-        categorias (id_categoria, nombre)
-      `)
-      .order('nombre', { ascending: true });
-    if (res.error) throw res.error;
-    data = res.data as any[];
-    richSelectSucceeded = true;
+    let from = 0;
+    while (true) {
+      const to = from + pageSize - 1;
+      const { data: chunk, error } = await supabase
+        .from('productos')
+        .select('*')
+        .order('nombre', { ascending: true })
+        .range(from, to);
+      if (error) throw error;
+      const arr = chunk || [];
+      allRows.push(...arr);
+      if (arr.length < pageSize) break; // no more pages
+      from += pageSize;
+    }
+    data = allRows;
   } catch (err) {
-    console.warn('getProducts: rich select failed, falling back to simple select:', (err as any)?.message || err);
+    // Fallback: try a simple un-paged select (best-effort)
+    console.warn('getProducts: paged fetch failed, falling back to single select:', (err as any)?.message || err);
     const res2 = await supabase
       .from('productos')
       .select('*')
@@ -372,6 +379,21 @@ export async function getProducts() {
   }
 
   // Map database fields to Product type
+  // Fetch category names for any referenced id_categoria so UI shows readable names
+  const categoryIds = Array.from(new Set((data || []).map((p: any) => p.id_categoria).filter(Boolean)));
+  let categoryIdToName: Record<string, string> = {};
+  if (categoryIds.length > 0) {
+    try {
+      const { data: cats } = await supabase
+        .from('categorias')
+        .select('id_categoria, nombre')
+        .in('id_categoria', categoryIds);
+      (cats || []).forEach((c: any) => { categoryIdToName[String(c.id_categoria)] = c.nombre; });
+    } catch (e) {
+      console.warn('getProducts: failed to fetch categorias for mapping', e);
+    }
+  }
+
   return (data || []).map((product: any) => {
     // Find related supplier rows for this product (from relaciones table)
     const related = productSuppliersRaw.filter((ps: any) => String(ps.id_producto) === String(product.id_producto));
@@ -389,7 +411,7 @@ export async function getProducts() {
       sku: product.sku,
       name: product.nombre,
       description: product.descripcion || '',
-      category: product.categorias?.nombre || 'Sin categoría',
+      category: product.categorias?.nombre || categoryIdToName[String(product.id_categoria)] || 'Sin categoría',
       categoryId: product.id_categoria,
       currentStock: product.stock_actual || 0,
       minStock: product.stock_minimo || 0,
