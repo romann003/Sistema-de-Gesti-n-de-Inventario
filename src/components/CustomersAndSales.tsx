@@ -598,8 +598,7 @@ export function CustomersAndSales({
     return availableProductsForPicker.filter((p) => {
       return (
         (p.name || '').toLowerCase().includes(q) ||
-        (p.sku || '').toLowerCase().includes(q) ||
-        String(p.id).toLowerCase().includes(q)
+        (p.sku || '').toLowerCase().includes(q)
       );
     });
   }, [availableProductsForPicker, pickerSearchQuery]);
@@ -1027,12 +1026,14 @@ export function CustomersAndSales({
       
   {/* Dialog: Crear Venta */}
   <Dialog open={isSaleDialogOpen} onOpenChange={setIsSaleDialogOpen}>
-    <DialogContent className="w-full sm:max-w-4xl rounded-xl overflow-y-auto max-h-[90vh] p-6">
-      <DialogHeader>
-        <DialogTitle>Registrar Venta</DialogTitle>
-        <DialogDescription>Registra una venta para un cliente y añade múltiples productos.</DialogDescription>
-      </DialogHeader>
-      <div className="flex flex-col md:flex-row gap-6">
+    {/* Use a column flex layout so footer can stay pinned to the bottom while content scrolls */}
+    <DialogContent className="w-full sm:max-w-4xl rounded-xl max-h-[90vh] p-0 flex flex-col">
+      <div className="p-6 overflow-y-auto flex-1">
+        <DialogHeader>
+          <DialogTitle>Registrar Venta</DialogTitle>
+          <DialogDescription>Registra una venta para un cliente y añade múltiples productos.</DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-col md:flex-row gap-6">
 
       {/* Middle: Customer column (md:flex-1) */}
               <div className="md:flex-1 min-w-0">
@@ -1222,26 +1223,28 @@ export function CustomersAndSales({
                 </Card>
               </div>
           </div>
-          <DialogFooter className="flex-col sm:flex-row gap-2 px-4">
+      </div>
+      <DialogFooter className="flex-col sm:flex-row gap-2 px-6 py-4 border-t bg-white">
             <Button variant="outline" onClick={() => setIsSaleDialogOpen(false)} className="rounded-lg w-full sm:w-auto">Cancelar</Button>
             <Button onClick={handleSaveSale} className="rounded-lg bg-green-600 hover:bg-green-700 w-full sm:w-auto" disabled={isLoading || saleItems.length === 0 || saleItems.some(it => {
               const prod = products.find(p => p.id === it.productId);
               return (prod && it.quantity > (prod.currentStock ?? 0));
             })}>Confirmar</Button>
-          </DialogFooter>
-        </DialogContent>
+      </DialogFooter>
+    </DialogContent>
       </Dialog>
 
       {/* Product picker modal */}
       <Dialog open={isProductPickerOpen} onOpenChange={setIsProductPickerOpen}>
-        {/* Allow dialog content to scroll when product list is long */}
-        <DialogContent className="w-full sm:max-w-3xl rounded-xl overflow-y-auto max-h-[90vh] p-6">
-          <DialogHeader>
-            <DialogTitle>Seleccionar producto</DialogTitle>
-            <DialogDescription>Elige un producto, ajusta precio y cantidad, y confírmalo para añadir a la venta.</DialogDescription>
-          </DialogHeader>
+        {/* Allow dialog content to scroll when product list is long. Use flex layout so footer stays pinned */}
+        <DialogContent className="w-full sm:max-w-3xl rounded-xl max-h-[90vh] p-0 flex flex-col">
+          <div className="p-6 overflow-y-auto flex-1">
+            <DialogHeader>
+              <DialogTitle>Seleccionar producto</DialogTitle>
+              <DialogDescription>Elige un producto, ajusta precio y cantidad, y confírmalo para añadir a la venta.</DialogDescription>
+            </DialogHeader>
 
-          <div className="mt-2">
+            <div className="mt-2">
             <div className="mb-3">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -1337,7 +1340,9 @@ export function CustomersAndSales({
             </div>
           </div>
 
-          <DialogFooter className="mt-4 ">
+          </div>
+
+          <DialogFooter className="flex-col sm:flex-row gap-2 px-6 py-4 border-t bg-white">
             <Button variant="outline" onClick={() => setIsProductPickerOpen(false)}>Cancelar</Button>
             <Button disabled={!pickerProductId} variant="outline" onClick={() => {
               // Add picked product to table but keep modal open
