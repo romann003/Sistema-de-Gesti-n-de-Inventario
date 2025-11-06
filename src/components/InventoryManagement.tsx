@@ -38,6 +38,13 @@ import { Textarea } from './ui/textarea';
 import { Separator } from './ui/separator';
 import { Plus, TrendingUp, TrendingDown, ArrowUpDown, Package, AlertTriangle, Tag, DollarSign, Layers, Truck, Eye } from 'lucide-react';
 import { Product, InventoryMovement, User, Supplier } from '../types';
+import {
+  isAdmin,
+  isEmployee,
+  canCreateMovement,
+  canEditProduct,
+  canDeleteProduct,
+} from '../utils/permissions';
 import { COMPANY } from '../config/company';
 import { SupplierDetailPanel } from './DynamicDetailPanel';
 import { toast } from 'sonner';
@@ -730,13 +737,20 @@ export function InventoryManagement({
                   <Button variant="outline" size="sm" onClick={() => loadEntradas(true)} disabled={loadingEntradasLoad}>
                     {loadingEntradasLoad ? 'Cargando...' : 'Recargar entradas'}
                   </Button>
-                  <Button
-                    onClick={handleOpenDialog}
-                    className="rounded-lg bg-blue-600 hover:bg-blue-700"
-                  >
-                    <Plus className="h-4 w-4 mr-2" />
-                    Registrar Entrada
-                  </Button>
+                  {canCreateMovement(currentUser) ? (
+                    <Button
+                      onClick={handleOpenDialog}
+                      className="rounded-lg bg-blue-600 hover:bg-blue-700"
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      Registrar Entrada
+                    </Button>
+                  ) : (
+                    <Button disabled title="No autorizado" className="rounded-lg" variant="secondary">
+                      <Plus className="h-4 w-4 mr-2" />
+                      Registrar Entrada
+                    </Button>
+                  )}
                 </div>
               ) : null}
             </div>

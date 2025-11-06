@@ -41,6 +41,7 @@ import { COMPANY } from './config/company';
 import { getProducts, getCategories, getSuppliers, getCustomers, getMovements, getSales, getAuditLogs, getUsers } from './lib/api';
 import { toast } from 'sonner';
 import { useAuth, RequireRole } from './contexts/AuthContext';
+import { isAdmin } from './utils/permissions';
 import { NotAuthorized } from './components/NotAuthorized';
 import { NotFound } from './components/NotFound';
 import { NoDataAccess } from './components/NoDataAccess';
@@ -469,19 +470,22 @@ export default function App() {
       id: 'products' as Section,
       label: 'Productos',
       icon: Package,
+      // Productos deben estar visibles para todos; acciones dentro se limitan con permisos
       available: true,
     },
     {
       id: 'categories' as Section,
       label: 'Categorías',
       icon: FolderOpen,
-      available: true,
+      // Solo administradores pueden gestionar categorías
+      available: isAdmin(currentUser),
     },
     {
       id: 'inventory' as Section,
       label: 'Inventario',
       icon: ArrowUpDown,
-      available: true,
+      // Inventario no debe ser visible para empleados según política
+      available: isAdmin(currentUser),
     },
     {
       id: 'sales' as Section,
@@ -493,7 +497,8 @@ export default function App() {
       id: 'suppliers' as Section,
       label: 'Proveedores',
       icon: Building2,
-      available: true,
+      // Proveedores gestión solo para admins
+      available: isAdmin(currentUser),
     },
     {
       id: 'customers' as Section,
@@ -505,13 +510,14 @@ export default function App() {
       id: 'audit' as Section,
       label: 'Auditoría',
       icon: History,
-      available: true,
+      // Auditoría solo para administradores
+      available: isAdmin(currentUser),
     },
     {
       id: 'users' as Section,
       label: 'Usuarios',
       icon: Users,
-      available: currentUser.role === 'Administrador',
+      available: isAdmin(currentUser),
     },
   ];
 
@@ -638,10 +644,22 @@ export default function App() {
             <Routes>
               <Route index element={<EnhancedDashboard products={products} movements={movements} qualityMetrics={mockQualityMetrics} sales={sales} />} />
               <Route path="dashboard" element={<EnhancedDashboard products={products} movements={movements} qualityMetrics={mockQualityMetrics} sales={sales} />} />
-              <Route path="products" element={<ProductsManagement products={products} categories={categories} suppliers={suppliers} onProductsChange={setProducts} onCategoriesChange={setCategories} />} />
-              <Route path="categories" element={<CategoriesManagement categories={categories} onCategoriesChange={setCategories} />} />
-              <Route path="inventory" element={<InventoryManagement products={products} suppliers={suppliers} movements={movements} currentUser={currentUser} onProductsChange={setProducts} onMovementsChange={setMovements} />} />
-              <Route path="suppliers" element={<SuppliersManagement suppliers={suppliers} onSuppliersChange={setSuppliers} />} />
+              <Route path="products" element={<ProductsManagement products={products} categories={categories} suppliers={suppliers} onProductsChange={setProducts} onCategoriesChange={setCategories} currentUser={currentUser} />} />
+              <Route path="categories" element={
+                <RequireRole roles={["Administrador"]}>
+                  <CategoriesManagement categories={categories} onCategoriesChange={setCategories} />
+                </RequireRole>
+              } />
+              <Route path="inventory" element={
+                <RequireRole roles={["Administrador"]}>
+                  <InventoryManagement products={products} suppliers={suppliers} movements={movements} currentUser={currentUser} onProductsChange={setProducts} onMovementsChange={setMovements} />
+                </RequireRole>
+              } />
+              <Route path="suppliers" element={
+                <RequireRole roles={["Administrador"]}>
+                  <SuppliersManagement suppliers={suppliers} onSuppliersChange={setSuppliers} />
+                </RequireRole>
+              } />
               <Route path="customers" element={<CustomersAndSales customers={customers} sales={sales} products={products} currentUserName={currentUser.fullName} currentUser={currentUser} onCustomersChange={setCustomers} onSalesChange={setSales} onProductsChange={setProducts} onMovementsChange={setMovements} movements={movements} showOnly={"customers"} />} />
               <Route path="sales" element={<CustomersAndSales customers={customers} sales={sales} products={products} currentUserName={currentUser.fullName} currentUser={currentUser} onCustomersChange={setCustomers} onSalesChange={setSales} onProductsChange={setProducts} onMovementsChange={setMovements} movements={movements} showOnly={"sales"} />} />
               <Route path="audit" element={

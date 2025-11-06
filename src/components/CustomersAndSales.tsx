@@ -13,6 +13,7 @@ import { Textarea } from './ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Search, Plus, Edit, Trash2, Users, ShoppingCart, DollarSign, TrendingUp, Package, AlertTriangle, Tag, Layers, Truck, Phone, Mail, MapPin, History, Eye } from 'lucide-react';
 import { Customer, Sale, Product, InventoryMovement, User } from '../types';
+import { isAdmin } from '../utils/permissions';
 import { COMPANY } from '../config/company';
 import { getUsers } from '../lib/api';
 import { toast } from 'sonner';
@@ -799,8 +800,12 @@ export function CustomersAndSales({
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => setDeleteCustomer(customer)}
-                                className="rounded-lg text-red-600 hover:text-red-700 hover:bg-red-50"
+                                onClick={() => {
+                                  if (isAdmin(currentUser)) setDeleteCustomer(customer);
+                                  else toast.error('No tienes permiso para eliminar clientes');
+                                }}
+                                className={`rounded-lg ${isAdmin(currentUser) ? 'text-red-600 hover:text-red-700 hover:bg-red-50' : 'opacity-50 cursor-not-allowed'}`}
+                                disabled={!isAdmin(currentUser)}
                               >
                                 <Trash2 className="h-4 w-4" />
                               </Button>

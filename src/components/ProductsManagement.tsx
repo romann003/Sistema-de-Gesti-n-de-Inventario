@@ -46,7 +46,8 @@ import {
   AlertDialogTitle,
 } from './ui/alert-dialog';
 import { Search, Plus, Edit, Trash2, AlertTriangle, Package, Eye, Layers, Truck, Tag, Building2 } from 'lucide-react';
-import { Product, Category, Supplier } from '../types';
+import { Product, Category, Supplier, User } from '../types';
+import { isAdmin, canEditProduct } from '../utils/permissions';
 import { toast } from 'sonner';
 import { motion } from 'motion/react';
 import { createProduct, updateProduct, deleteProduct as deleteProductAPI } from '../lib/api';
@@ -58,6 +59,7 @@ interface ProductsManagementProps {
   suppliers: Supplier[];
   onProductsChange: (products: Product[]) => void;
   onCategoriesChange: (categories: Category[]) => void;
+  currentUser?: User | null;
 }
 
 export function ProductsManagement({
@@ -66,6 +68,7 @@ export function ProductsManagement({
   suppliers,
   onProductsChange,
   onCategoriesChange,
+  currentUser,
 }: ProductsManagementProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [isSheetOpen, setIsSheetOpen] = useState(false);
@@ -290,13 +293,20 @@ export function ProductsManagement({
                 Busca, edita o elimina productos del sistema
               </CardDescription>
             </div>
-            <Button
-              onClick={() => handleOpenSheet()}
-              className="rounded-lg bg-blue-600 hover:bg-blue-700"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Nuevo Producto
-            </Button>
+            {canEditProduct(currentUser) ? (
+              <Button
+                onClick={() => handleOpenSheet()}
+                className="rounded-lg bg-blue-600 hover:bg-blue-700"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Nuevo Producto
+              </Button>
+            ) : (
+              <Button disabled title="No autorizado" className="rounded-lg opacity-60 cursor-not-allowed" variant="secondary">
+                <Plus className="h-4 w-4 mr-2" />
+                Nuevo Producto
+              </Button>
+            )}
           </div>
         </CardHeader>
         <CardContent>
@@ -396,16 +406,24 @@ export function ProductsManagement({
                             <Button
                               variant="ghost"
                               size="sm"
-                              onClick={() => handleOpenSheet(product)}
-                              className="rounded-lg"
+                              onClick={() => {
+                                if (canEditProduct(currentUser)) handleOpenSheet(product);
+                                else toast.error('No tienes permiso para editar productos');
+                              }}
+                              className={`rounded-lg ${canEditProduct(currentUser) ? '' : 'opacity-50 cursor-not-allowed'}`}
+                              disabled={!canEditProduct(currentUser)}
                             >
                               <Edit className="h-4 w-4" />
                             </Button>
                             <Button
                               variant="ghost"
                               size="sm"
-                              onClick={() => setDeleteProduct(product)}
-                              className="rounded-lg text-red-600 hover:text-red-700 hover:bg-red-50"
+                              onClick={() => {
+                                if (isAdmin(currentUser)) setDeleteProduct(product);
+                                else toast.error('No tienes permiso para eliminar productos');
+                              }}
+                              className={`rounded-lg ${isAdmin(currentUser) ? 'text-red-600 hover:text-red-700 hover:bg-red-50' : 'opacity-50 cursor-not-allowed'}`}
+                              disabled={!isAdmin(currentUser)}
                             >
                               <Trash2 className="h-4 w-4" />
                             </Button>
@@ -868,16 +886,7 @@ export function ProductsManagement({
               >
                 Cerrar
               </Button>
-              <Button
-                onClick={() => {
-                  setIsSheetOpen(false);
-                  setTimeout(() => handleOpenSheet(selectedProduct), 300);
-                }}
-                className="rounded-lg bg-blue-600 hover:bg-blue-700 w-full sm:w-auto"
-              >
-                <Edit className="h-4 w-4 mr-2" />
-                Editar Producto
-              </Button>
+              {/* Edit button intentionally removed for detail-only view per policy */}
             </SheetFooter>
           ) : !isDetailView && (
             <SheetFooter className="flex-col sm:flex-row gap-3">
