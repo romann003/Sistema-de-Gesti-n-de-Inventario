@@ -199,33 +199,17 @@ export function LoginPage() {
               <div className="bg-white rounded p-3 text-xs space-y-2">
                 <div className="border-b pb-2">
                   <p className="font-semibold text-blue-700">👨‍💼 Administrador:</p>
-                  <p className="text-gray-600">Correo: <code className="bg-gray-100 px-1 rounded">admin@inventario.com</code></p>
-                  <p className="text-gray-600">Contraseña: <code className="bg-gray-100 px-1 rounded">admin123</code></p>
+                  <p className="text-gray-600">Correo: <code className="bg-gray-100 px-1 rounded">admin@novasol.com</code></p>
+                  <p className="text-gray-600">Contraseña: <code className="bg-gray-100 px-1 rounded">Admin123!</code></p>
                 </div>
                 <div>
                   <p className="font-semibold text-green-700">👤 Empleado:</p>
-                  <p className="text-gray-600">Correo: <code className="bg-gray-100 px-1 rounded">empleado@inventario.com</code></p>
-                  <p className="text-gray-600">Contraseña: <code className="bg-gray-100 px-1 rounded">empleado123</code></p>
+                  <p className="text-gray-600">Correo: <code className="bg-gray-100 px-1 rounded">empleado@novasol.com</code></p>
+                  <p className="text-gray-600">Contraseña: <code className="bg-gray-100 px-1 rounded">Empleado123!</code></p>
                 </div>
               </div>
             </div>
-            <details className="mt-2">
-              <summary className="text-xs text-blue-600 cursor-pointer hover:text-blue-800">
-                🔧 Información técnica
-              </summary>
-              <div className="mt-2 p-2 bg-white rounded text-xs space-y-1">
-                <p><strong>Tabla:</strong> usuarios (autenticación independiente)</p>
-                <p><strong>Script:</strong> crear-tabla-usuarios.sql</p>
-                <p className="text-gray-500 mt-2">
-                  Si necesitas crear más usuarios:
-                </p>
-                <ol className="list-decimal list-inside text-gray-600 ml-2">
-                  <li>Abre SQL Editor en Supabase</li>
-                  <li>Ejecuta: INSERT INTO usuarios...</li>
-                  <li>O usa la interfaz de gestión de usuarios</li>
-                </ol>
-              </div>
-            </details>
+            {/* Información técnica eliminada según solicitud del usuario */}
           </div>
         </CardContent>
       </Card>

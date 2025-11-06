@@ -6,7 +6,6 @@ import { EnhancedDashboard } from './components/EnhancedDashboard';
 import { ProductsManagement } from './components/ProductsManagement';
 import { InventoryManagement } from './components/InventoryManagement';
 import { UsersManagement } from './components/UsersManagement';
-import { AdvancedSearch } from './components/AdvancedSearch';
 import { AuditLog } from './components/AuditLog';
 import { SuppliersManagement } from './components/SuppliersManagement';
 import { CustomersAndSales } from './components/CustomersAndSales';
@@ -43,6 +42,8 @@ import { getProducts, getCategories, getSuppliers, getCustomers, getMovements, g
 import { toast } from 'sonner';
 import { useAuth, RequireRole } from './contexts/AuthContext';
 import { NotAuthorized } from './components/NotAuthorized';
+import { NotFound } from './components/NotFound';
+import { NoDataAccess } from './components/NoDataAccess';
 import { useNavigate, useLocation, Routes, Route, Link } from 'react-router-dom';
 
 type Section =
@@ -51,7 +52,6 @@ type Section =
   | 'categories'
   | 'inventory'
   | 'sales'
-  | 'search'
   | 'audit'
   | 'suppliers'
   | 'customers'
@@ -408,7 +408,6 @@ export default function App() {
       case 'categories': return 'categories';
       case 'inventory': return 'inventory';
       case 'sales': return 'sales';
-      case 'search': return 'search';
       case 'suppliers': return 'suppliers';
       case 'customers': return 'customers';
       case 'audit': return 'audit';
@@ -488,12 +487,6 @@ export default function App() {
       id: 'sales' as Section,
       label: 'Ventas',
       icon: ShoppingCart,
-      available: true,
-    },
-    {
-      id: 'search' as Section,
-      label: 'Búsqueda Avanzada',
-      icon: Search,
       available: true,
     },
     {
@@ -648,7 +641,6 @@ export default function App() {
               <Route path="products" element={<ProductsManagement products={products} categories={categories} suppliers={suppliers} onProductsChange={setProducts} onCategoriesChange={setCategories} />} />
               <Route path="categories" element={<CategoriesManagement categories={categories} onCategoriesChange={setCategories} />} />
               <Route path="inventory" element={<InventoryManagement products={products} suppliers={suppliers} movements={movements} currentUser={currentUser} onProductsChange={setProducts} onMovementsChange={setMovements} />} />
-              <Route path="search" element={<AdvancedSearch products={products} suppliers={suppliers} categories={categoryNames} />} />
               <Route path="suppliers" element={<SuppliersManagement suppliers={suppliers} onSuppliersChange={setSuppliers} />} />
               <Route path="customers" element={<CustomersAndSales customers={customers} sales={sales} products={products} currentUserName={currentUser.fullName} currentUser={currentUser} onCustomersChange={setCustomers} onSalesChange={setSales} onProductsChange={setProducts} onMovementsChange={setMovements} movements={movements} showOnly={"customers"} />} />
               <Route path="sales" element={<CustomersAndSales customers={customers} sales={sales} products={products} currentUserName={currentUser.fullName} currentUser={currentUser} onCustomersChange={setCustomers} onSalesChange={setSales} onProductsChange={setProducts} onMovementsChange={setMovements} movements={movements} showOnly={"sales"} />} />
@@ -663,6 +655,9 @@ export default function App() {
                 </RequireRole>
               } />
               <Route path="not-authorized" element={<NotAuthorized />} />
+              <Route path="no-data-access" element={<NoDataAccess />} />
+              {/* 404 catch-all */}
+              <Route path="*" element={<NotFound />} />
             </Routes>
           </motion.div>
         </main>
