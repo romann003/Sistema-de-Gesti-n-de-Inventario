@@ -309,15 +309,31 @@ export async function deleteSupplier(id: string) {
 // Products APIs
 export async function getProducts() {
   const supabase = getSupabase();
-  const { data, error } = await supabase
-    .from('productos')
-    .select(`
-      *,
-      categorias (id_categoria, nombre)
-    `)
-    .order('nombre', { ascending: true });
-
-  if (error) throw error;
+  // Try a rich select with nested categorias; if the DB schema does not have
+  // the FK relationship declared, PostgREST may return 400. Fall back to a
+  // simple select('*') and enrich categories afterwards.
+  let data: any[] | null = null;
+  let richSelectSucceeded = false;
+  try {
+    const res = await supabase
+      .from('productos')
+      .select(`
+        *,
+        categorias (id_categoria, nombre)
+      `)
+      .order('nombre', { ascending: true });
+    if (res.error) throw res.error;
+    data = res.data as any[];
+    richSelectSucceeded = true;
+  } catch (err) {
+    console.warn('getProducts: rich select failed, falling back to simple select:', (err as any)?.message || err);
+    const res2 = await supabase
+      .from('productos')
+      .select('*')
+      .order('nombre', { ascending: true });
+    if (res2.error) throw res2.error;
+    data = res2.data as any[];
+  }
   
   // Try to get all product-supplier relationships (productos_proveedores may not exist)
   let productSuppliersRaw: any[] = [];
@@ -827,34 +843,37 @@ export async function deleteCustomer(id: string) {
 // Inventory Movements APIs
 export async function getMovements() {
   const supabase = getSupabase();
-  // Try the rich select first (includes nested producto and usuario). If it fails
-  // (missing relationships or permission issues), fallback to a simple select.
+  // Use a simple select by default to avoid dependency on DB foreign-key
+  // relationships existing in the Postgres schema cache. Many deployments
+  // (especially migrated or seed-loaded databases) may not have explicit
+  // relationships configured, which causes nested/rich selects to return 400
+  // errors from PostgREST. A simple select('*') is more robust across setups;
+  // additional product/user enrichment is performed below when needed.
+  // Some PostgREST deployments impose a hard row limit per request (e.g. 1000-2000).
+  // To ensure we return the complete set for admin UIs, page through results using
+  // the range() operator until no more rows are returned.
+  const pageSize = 1000;
+  let allRows: any[] = [];
   let data: any[] | null = null;
   try {
-    const res = await supabase
-      .from('movimientos_inventario')
-      .select(`
-        *,
-        productos (id_producto, nombre, sku, precio, stock_actual, stock_minimo, stock_maximo, categorias (id_categoria, nombre)),
-        usuarios (id, nombre)
-      `)
-      .order('fecha', { ascending: false });
-    if (res.error) throw res.error;
-    data = res.data as any[];
-  } catch (err) {
-    console.warn('getMovements: rich select failed, attempting simple select fallback:', (err as any)?.message || err);
-    try {
-      const res2 = await supabase
+    let from = 0;
+    while (true) {
+      const to = from + pageSize - 1;
+      const res = await supabase
         .from('movimientos_inventario')
         .select('*')
-        .order('fecha', { ascending: false });
-      if (res2.error) throw res2.error;
-      data = res2.data as any[];
-    } catch (err2) {
-      console.error('getMovements: both rich and simple selects failed:', (err2 as any)?.message || err2);
-      // Let the caller handle empty fallback
-      throw err2;
+        .order('fecha', { ascending: false })
+        .range(from, to);
+      if (res.error) throw res.error;
+      const chunk = (res.data || []) as any[];
+      allRows.push(...chunk);
+      if (chunk.length < pageSize) break; // no more pages
+      from += pageSize;
     }
+    data = allRows;
+  } catch (err) {
+    console.error('getMovements: paged fetch failed:', (err as any)?.message || err);
+    throw err;
   }
 
   // If some rows lack nested product details, batch-fetch those products as a fallback
@@ -871,13 +890,38 @@ export async function getMovements() {
   if (missingProductIds.size > 0) {
     try {
       const ids = Array.from(missingProductIds);
+      // Avoid nested selects here because some DBs don't have FK relationships
+      // declared and PostgREST will return 400 for nested selects. Fetch only
+      // product core fields and then batch-fetch categories separately.
       const { data: fetched } = await supabase
         .from('productos')
-        .select('id_producto, nombre, sku, precio, stock_actual, stock_minimo, stock_maximo, id_categoria, categorias (id_categoria, nombre)')
+        .select('id_producto, nombre, sku, precio, stock_actual, stock_minimo, stock_maximo, id_categoria')
         .in('id_producto', ids);
       (fetched || []).forEach((p: any) => {
         fetchedProductsMap[String(p.id_producto)] = p;
       });
+
+      // If any products reference categories, fetch category names separately
+      const catIds = Array.from(new Set((fetched || []).map((p: any) => p.id_categoria).filter(Boolean)));
+      if (catIds.length > 0) {
+        try {
+          const { data: cats } = await supabase
+            .from('categorias')
+            .select('id_categoria, nombre')
+            .in('id_categoria', catIds);
+          const catMap: Record<string, any> = {};
+          (cats || []).forEach((c: any) => { catMap[String(c.id_categoria)] = c; });
+          // attach category object where appropriate
+          (fetched || []).forEach((p: any) => {
+            if (p.id_categoria && catMap[String(p.id_categoria)]) {
+              fetchedProductsMap[String(p.id_producto)].categorias = catMap[String(p.id_categoria)];
+            }
+          });
+        } catch (e) {
+          // ignore category fetch errors
+          console.warn('getMovements: failed to batch fetch categorias for products fallback', e);
+        }
+      }
     } catch (e) {
       // ignore and let rows render with best-effort data
       console.warn('Failed to batch fetch products for movements fallback', e);
@@ -952,71 +996,166 @@ export async function getMovements() {
   });
 }
 
+// Convenience helper: fetch normalized movements and return only entradas
+export async function getEntradas() {
+  // Prefer the normalized movements API. If that returns nothing (for example
+  // because of transient permission/schema issues), fall back to a raw query
+  // and normalize rows here so callers reliably get entrada items.
+  try {
+    const movements = await getMovements();
+    const entradas = (movements || []).filter((m: any) => (m?.type || '').toString().toLowerCase() === 'entrada');
+    if ((entradas || []).length > 0) return entradas;
+  } catch (err) {
+    console.warn('getEntradas: getMovements() failed, falling back to raw fetch:', (err as any)?.message || err);
+  }
+
+  // Fallback: fetch raw rows and map to normalized shape similar to getMovements
+  try {
+    const rows = await getRawEntradas();
+    const mapped = (rows || []).map((row: any) => {
+      const product = row.productos || {};
+      const prod = Object.keys(product || {}).length ? product : {};
+      const rawDate = row.fecha || row.created_at || row.updated_at || null;
+      let dateObj: Date | null = null;
+      try {
+        dateObj = rawDate ? new Date(rawDate) : null;
+        if (dateObj && isNaN(dateObj.getTime())) dateObj = null;
+      } catch (e) {
+        dateObj = null;
+      }
+
+      const tipo = String(row.tipo || row.tipo_movimiento || '').toLowerCase();
+      const type: 'entrada' | 'salida' = tipo.includes('salida') ? 'salida' : 'entrada';
+
+      const performedId = row.id_usuario || row.performed_by || row.usuario || null;
+      return {
+        id: row.id_movimiento || row.id || String(row.id_movimiento || row.id),
+        productId: prod.id_producto || row.id_producto || null,
+        productName: prod.nombre || row.product_name || row.nombre_producto || '',
+        sku: prod.sku || row.sku || '',
+        productCategory: prod.categorias?.nombre || prod.nombre_categoria || row.categoria || row.id_categoria || null,
+        type,
+        quantity: Number(row.cantidad || row.quantity || 0),
+        reason: row.motivo || row.reason || '',
+        performedBy: performedId || '',
+        performedByName: row.usuarios?.nombre || undefined,
+        productPrice: prod.precio ? Number(prod.precio) : undefined,
+        stockActual: prod.stock_actual ?? undefined,
+        stockMin: prod.stock_minimo ?? undefined,
+        stockMax: prod.stock_maximo ?? undefined,
+        date: dateObj || new Date(),
+        notes: row.notas || row.notes || '',
+        customerId: row.id_cliente || undefined,
+        customerName: row.nombre_cliente || undefined,
+        _raw: row,
+      } as any;
+    });
+    return mapped.filter((m: any) => (m?.type || '').toString().toLowerCase() === 'entrada');
+  } catch (err) {
+    console.error('getEntradas fallback failed:', err);
+    return [];
+  }
+}
+
+// Return raw DB rows for entradas (useful for debugging). Case-insensitive match on tipo.
+export async function getRawEntradas() {
+  const supabase = getSupabase();
+  // Use ILIKE to match 'entrada' in any casing; some legacy data may use different values.
+  const pageSize = 1000;
+  const allRows: any[] = [];
+  try {
+    let from = 0;
+    while (true) {
+      const to = from + pageSize - 1;
+      const { data, error } = await supabase
+        .from('movimientos_inventario')
+        .select('*')
+        .ilike('tipo', '%entrada%')
+        .order('fecha', { ascending: false })
+        .range(from, to);
+      if (error) throw error;
+      const chunk = data || [];
+      allRows.push(...chunk);
+      if (chunk.length < pageSize) break;
+      from += pageSize;
+    }
+    return allRows;
+  } catch (err) {
+    console.error('getRawEntradas paged fetch failed:', (err as any)?.message || err);
+    throw err;
+  }
+}
+
 export async function getMovementById(id: string) {
   const supabase = getSupabase();
-  // Try rich select first (with nested producto and usuario). If it fails
-  // because there is no relationship defined in DB, fallback to simple select
+  // Use simple select and enrich manually to avoid PostgREST 400 errors caused
+  // by missing FK relationships (nested selects). Fetch the movement row and
+  // then fetch product, usuario and proveedor separately when needed.
   let mv: any = null;
-  try {
-    const { data: movement, error } = await supabase
-      .from('movimientos_inventario')
-      .select(`*, productos (id_producto, nombre, sku, precio, stock_actual, stock_minimo, stock_maximo, categorias (id_categoria, nombre)), usuarios (id, nombre)`)
-      .eq('id_movimiento', id)
-      .single();
-    if (error) throw error;
-    mv = movement || {};
-  } catch (err) {
-    console.warn('getMovementById: rich select failed, falling back to simple select:', (err as any)?.message || err);
-    const { data: movement, error } = await supabase
-      .from('movimientos_inventario')
-      .select('*')
-      .eq('id_movimiento', id)
-      .single();
-    if (error) throw error;
-    mv = movement || {};
+  const { data: movement, error } = await supabase
+    .from('movimientos_inventario')
+    .select('*')
+    .eq('id_movimiento', id)
+    .single();
+  if (error) throw error;
+  mv = movement || {};
 
-    // If product data missing, fetch product separately
-    const pid = mv.id_producto || mv.productos?.id_producto || null;
-    if (pid && !mv.productos) {
-      try {
-        const { data: prod } = await supabase
-          .from('productos')
-          .select('id_producto, nombre, sku, precio, stock_actual, stock_minimo, stock_maximo, id_categoria, categorias (id_categoria, nombre)')
-          .eq('id_producto', pid)
-          .single();
-        if (prod) mv.productos = prod;
-      } catch (e) {
-        console.warn('Failed to fetch product for movement fallback', e);
+  // If product data missing, fetch product separately (no nested categorias)
+  const pid = mv.id_producto || mv.productos?.id_producto || null;
+  if (pid && !mv.productos) {
+    try {
+      const { data: prod } = await supabase
+        .from('productos')
+        .select('id_producto, nombre, sku, precio, stock_actual, stock_minimo, stock_maximo, id_categoria')
+        .eq('id_producto', pid)
+        .single();
+      if (prod) {
+        // try to attach categoria name separately
+        if (prod.id_categoria) {
+          try {
+            const { data: cat } = await supabase
+              .from('categorias')
+              .select('id_categoria, nombre')
+              .eq('id_categoria', prod.id_categoria)
+              .single();
+            if (cat) prod.categorias = cat;
+          } catch (e) {
+            // ignore
+          }
+        }
+        mv.productos = prod;
       }
+    } catch (e) {
+      console.warn('Failed to fetch product for movement fallback', e);
     }
+  }
 
-    // If usuario info missing, fetch usuario separately
-    const uid = mv.id_usuario || mv.performed_by || mv.usuario || null;
-    if (uid && !mv.usuarios) {
-      try {
-        const { data: usr } = await supabase
-          .from('usuarios')
-          .select('id, nombre')
-          .eq('id', uid)
-          .single();
-        if (usr) mv.usuarios = usr;
-      } catch (e) {
-        console.warn('Failed to fetch usuario for movement fallback', e);
-      }
+  // If usuario info missing, fetch usuario separately
+  const uid = mv.id_usuario || mv.performed_by || mv.usuario || null;
+  if (uid && !mv.usuarios) {
+    try {
+      const { data: usr } = await supabase
+        .from('usuarios')
+        .select('id, nombre')
+        .eq('id', uid)
+        .single();
+      if (usr) mv.usuarios = usr;
+    } catch (e) {
+      console.warn('Failed to fetch usuario for movement fallback', e);
     }
+  }
 
-    // If there's an id_proveedor, try to fetch supplier details separately
-    if (mv.id_proveedor) {
-      try {
-        const { data: supplier } = await supabase
-          .from('proveedores')
-          .select('id_proveedor, nombre, contacto, correo, telefono, direccion')
-          .eq('id_proveedor', mv.id_proveedor)
-          .single();
-        if (supplier) mv.proveedor = supplier;
-      } catch (supError) {
-        console.warn('Supplier fetch error for movement (fallback)', (supError as any)?.message || supError);
-      }
+  // If there's an id_proveedor, try to fetch supplier details separately
+  if (mv.id_proveedor) {
+    try {
+      const { data: supplier } = await supabase
+        .from('proveedores')
+        .select('id_proveedor, nombre, contacto, correo, telefono, direccion')
+        .eq('id_proveedor', mv.id_proveedor)
+        .single();
+      if (supplier) mv.proveedor = supplier;
+    } catch (supError) {
+      console.warn('Supplier fetch error for movement (fallback)', (supError as any)?.message || supError);
     }
   }
 

@@ -86,6 +86,8 @@ export function InventoryManagement({
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
+  const selectedProduct = formData.productId ? products.find((p) => p.id === formData.productId) : null;
+  const selectedSupplier = formData.supplierId ? suppliers.find((s) => s.id === formData.supplierId) : null;
 
   const handleOpenDialog = () => {
     setFormData({
@@ -103,89 +105,128 @@ export function InventoryManagement({
   // Save handler for the new movement dialog (minimal, client-side only)
   const handleSave = async () => {
     if (!validateForm()) return;
-    try {
-      const qty = Number(formData.quantity) || 0;
-      const newMovement: any = {
-        id: `local-${Date.now()}`,
-        productId: formData.productId,
-        productName: selectedProduct?.name || '',
-        sku: selectedProduct?.sku || '',
-        type: formData.type || 'entrada',
-        quantity: qty,
-        reason: formData.reason,
-        notes: formData.notes,
-        date: new Date(),
-        performedBy: currentUser?.id || '',
-        performedByName: currentUser?.name || currentUser?.email || '',
-        _raw: {},
-      };
+    const qty = Number(formData.quantity) || 0;
+    // Prepare payload for server
+    const payload: any = {
+      id_producto: formData.productId,
+      tipo: formData.type === 'entrada' ? 'Entrada' : 'Ajuste',
+      cantidad: qty,
+      motivo: formData.reason,
+      notas: formData.notes || undefined,
+    };
 
-      // Update movements in parent/state
-      try {
-        onMovementsChange([...(movements || []), newMovement]);
-      } catch (err) {
-        console.debug('onMovementsChange error', err);
+    if (formData.supplierId) payload.id_proveedor = formData.supplierId;
+
+    try {
+  const { createMovement } = await import('../lib/api');
+  // Prefer passing the current user's id if available to avoid relying on
+  // Supabase auth session being present in the client. The API will use
+  // this id_usuario if provided and only fallback to supabase.auth.getUser().
+  const saved = await createMovement({ ...(payload as any), id_usuario: currentUser?.id });
+
+      // Normalize and add saved movement to parent state
+      const normalized = normalizeMovement(saved) || null;
+      if (normalized) {
+        try {
+          onMovementsChange([...(movements || []), normalized]);
+        } catch (err) {
+          console.debug('onMovementsChange error after save', err);
+        }
+      } else {
+        // fallback: construct a local representation
+        const local: any = {
+          id: saved.id_movimiento || saved.id || `local-${Date.now()}`,
+          productId: formData.productId,
+          productName: selectedProduct?.name || '',
+          sku: selectedProduct?.sku || '',
+          type: 'entrada',
+          quantity: qty,
+          reason: formData.reason,
+          notes: formData.notes,
+          date: new Date(saved.fecha || saved.created_at || Date.now()),
+          performedBy: saved.id_usuario || currentUser?.id || '',
+          _raw: saved,
+        };
+        try { onMovementsChange([...(movements || []), local]); } catch (err) { console.debug('onMovementsChange fallback error', err); }
       }
 
       // Update product stock locally (best-effort)
-      if (newMovement.type === 'entrada' && selectedProduct) {
+      if (selectedProduct && payload.tipo === 'Entrada') {
         try {
           const updatedProducts = products.map((p) => p.id === selectedProduct.id ? { ...p, currentStock: (p.currentStock || 0) + qty } : p);
           onProductsChange(updatedProducts);
         } catch (err) {
-          console.debug('onProductsChange error', err);
+          console.debug('onProductsChange error after save', err);
         }
       }
 
       setIsDialogOpen(false);
-      toast.success('Movimiento registrado');
-    } catch (err) {
-      console.error('Error saving movement', err);
-      toast.error('Error al registrar movimiento');
+      toast.success('Entrada registrada');
+    } catch (err: any) {
+      console.error('Error saving movement to server', err);
+      toast.error(err?.message || 'Error al registrar movimiento en el servidor');
+
+      // Fallback: persist locally to keep UX responsive
+      try {
+        const fallback: any = {
+          id: `local-${Date.now()}`,
+          productId: formData.productId,
+          productName: selectedProduct?.name || '',
+          sku: selectedProduct?.sku || '',
+          type: 'entrada',
+          quantity: qty,
+          reason: formData.reason,
+          notes: formData.notes,
+          date: new Date(),
+          performedBy: currentUser?.id || '',
+          _raw: {},
+        };
+        onMovementsChange([...(movements || []), fallback]);
+        if (selectedProduct) {
+          const updatedProducts = products.map((p) => p.id === selectedProduct.id ? { ...p, currentStock: (p.currentStock || 0) + qty } : p);
+          onProductsChange(updatedProducts);
+        }
+        setIsDialogOpen(false);
+        toast.success('Entrada registrada localmente (sincronización pendiente)');
+      } catch (fallbackErr) {
+        console.error('Fallback save failed', fallbackErr);
+      }
     }
   };
+  
 
-  const selectedProduct = formData.productId ? products.find((p) => p.id === formData.productId) : null;
-  const selectedSupplier = formData.supplierId ? suppliers.find((s) => s.id === formData.supplierId) : null;
-
-  // Helper to normalize movement objects coming from API or older code
   const normalizeMovement = (m: any) => {
     if (!m) return null;
-    const raw = m._raw || m;
-    let productName = m.productName ?? raw.productos?.nombre ?? raw.nombre_producto ?? raw.nombre ?? raw.product_name ?? '';
-    // If productName is object (unexpected), try to extract a meaningful string
-    if (productName && typeof productName === 'object') {
-      productName = productName.nombre || productName.name || productName.label || JSON.stringify(productName);
-    }
-
-    let sku = m.sku ?? raw.productos?.sku ?? raw.sku ?? raw.codigo ?? '';
-    if (sku && typeof sku === 'object') {
-      sku = sku.toString();
-    }
-
+    const raw = (m as any)._raw || m;
+    const productName = m.productName ?? raw.productos?.nombre ?? raw.nombre_producto ?? raw.nombre ?? raw.product_name ?? '';
+    const sku = m.sku ?? raw.productos?.sku ?? raw.sku ?? raw.codigo ?? '';
     const date = m.date ? (m.date instanceof Date ? m.date : new Date(m.date)) : (raw.fecha ? new Date(raw.fecha) : new Date());
-    const type = (m.type || raw.tipo || raw.tipo_movimiento || '').toString().toLowerCase();
-  const quantity = Number((m.quantity ?? raw.cantidad ?? raw.cant) || 0);
-  const reason = m.reason || raw.motivo || raw.descripcion || raw.observaciones || '';
-  const performedBy = m.performedBy || raw.performedBy || raw.realizado_por || raw.id_usuario || raw.performed_by || '';
-  const performedByName = m.performedByName || raw.usuarios?.nombre || raw.performedByName || undefined;
-
-  const productPrice = m.productPrice ?? raw.productos?.precio ?? raw.precio ?? undefined;
-  const stockActual = m.stockActual ?? raw.productos?.stock_actual ?? raw.stock_actual ?? undefined;
-  const stockMin = m.stockMin ?? raw.productos?.stock_minimo ?? raw.stock_minimo ?? undefined;
-  const stockMax = m.stockMax ?? raw.productos?.stock_maximo ?? raw.stock_maximo ?? undefined;
-
-    // Normalize cliente information from multiple possible shapes
+  // Robust type detection:
+  // - check common tipo fields
+  // - accept synonyms like 'ingreso' or 'entrada' (case-insensitive)
+  // - treat negative cantidad as 'salida'
+  // - default to 'entrada' when ambiguous (most movements are entradas in imports)
+  const typeRaw = (m.type || raw.tipo || raw.tipo_movimiento || '').toString().toLowerCase();
+  const qtyRaw = Number(m.quantity ?? raw.cantidad ?? raw.cant ?? 0);
+  const isSalidaKeyword = /salida|venta|egreso|egress|out\b/.test(typeRaw);
+  const isEntradaKeyword = /entrada|ingreso|ingress|in\b/.test(typeRaw);
+  let type: 'entrada' | 'salida' = 'entrada';
+  if (isSalidaKeyword) type = 'salida';
+  else if (isEntradaKeyword) type = 'entrada';
+  else if (!isNaN(qtyRaw) && qtyRaw < 0) type = 'salida';
+  else type = 'entrada';
+    const quantity = Number((m.quantity ?? raw.cantidad ?? raw.cant) || 0);
+    const reason = m.reason || raw.motivo || raw.descripcion || raw.observaciones || '';
+    const performedBy = m.performedBy || raw.performedBy || raw.realizado_por || raw.id_usuario || raw.performed_by || '';
+    const performedByName = m.performedByName || raw.usuarios?.nombre || undefined;
+    const productPrice = m.productPrice ?? raw.productos?.precio ?? raw.precio;
+    const stockActual = m.stockActual ?? raw.productos?.stock_actual ?? raw.stock_actual;
+    const stockMin = m.stockMin ?? raw.productos?.stock_minimo ?? raw.stock_minimo;
+    const stockMax = m.stockMax ?? raw.productos?.stock_maximo ?? raw.stock_maximo;
     const clienteRaw = m.cliente || raw.cliente || raw.clientes || (Array.isArray(raw.clientes) ? raw.clientes[0] : undefined) || raw;
     const cliente = {
       id: m.customerId || raw.id_cliente || raw.cliente_id || clienteRaw?.id || clienteRaw?.id_cliente || null,
-      name: m.customerName || clienteRaw?.nombre || clienteRaw?.name || clienteRaw?.razon_social || raw.nombre_cliente || raw.cliente_nombre || '',
-      contactName: clienteRaw?.contacto || clienteRaw?.contactName || clienteRaw?.contacto_nombre || raw.contacto_cliente || '',
-      email: clienteRaw?.correo || clienteRaw?.email || raw.correo_cliente || raw.cliente_correo || '',
-      phone: clienteRaw?.telefono || clienteRaw?.phone || raw.telefono_cliente || raw.cliente_telefono || '',
-      address: clienteRaw?.direccion || clienteRaw?.address || raw.direccion_cliente || raw.cliente_direccion || '',
-      rfc: clienteRaw?.rfc || raw.rfc_cliente || raw.cliente_rfc || '',
-      razon_social: clienteRaw?.razon_social || '',
+      name: m.customerName || clienteRaw?.nombre || clienteRaw?.name || clienteRaw?.razon_social || '',
       _raw: clienteRaw,
     };
 
@@ -195,43 +236,13 @@ export function InventoryManagement({
       productName: productName || '',
       sku: sku || '',
       productCategory: m.productCategory || raw.productos?.categorias?.nombre || raw.categoria || null,
-      type: type === 'salida' ? 'salida' : 'entrada',
+      type,
       quantity,
       reason,
       performedBy,
       performedByName,
       date,
-      // Normalize notes: prefer textual fields and avoid showing numeric IDs.
-      notes: (() => {
-        const pick = (v: any) => (v === null || v === undefined ? '' : String(v));
-        const candidates = [m.notes, raw.notas, raw.observaciones, raw.descripcion, raw.note, raw.notes, raw.meta?.nota, raw.meta?.notes, raw.data?.notas, raw.data?.note];
-        const isLikelyId = (val: string) => {
-          if (!val) return false;
-          // numeric or very short numeric string likely an id
-          if (/^\d+$/.test(val) && val.length <= 6) return true;
-          return false;
-        };
-        const isSaleReference = (val: string) => {
-          if (!val) return false;
-          // UUID-like reference or explicit 'venta' mention with an id should be considered a sale reference
-          const uuidRe = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/;
-          if (uuidRe.test(val)) return true;
-          if (/\bventa\b/i.test(val) && /\b(id|id:|venta id|venta_id)\b/i.test(val)) return true;
-          return false;
-        };
-
-        for (const c of candidates) {
-          if (c === undefined || c === null) continue;
-          const s = pick(c).trim();
-          if (!s) continue;
-          if (isLikelyId(s)) continue; // skip candidate that looks like an id
-          if (isSaleReference(s)) continue; // skip strings that are only a sale reference
-          return s;
-        }
-        // Last resort: if there is any notas-like field that is NOT a sale reference, return it
-        const last = pick(m.notes ?? raw.notas ?? raw.notes ?? '');
-        return isSaleReference(last) ? '' : (last || '');
-      })(),
+      notes: m.notes || raw.notas || raw.observaciones || raw.descripcion || raw.note || '',
       productPrice: productPrice !== undefined ? Number(productPrice) : undefined,
       stockActual: stockActual !== undefined ? Number(stockActual) : undefined,
       stockMin: stockMin !== undefined ? Number(stockMin) : undefined,
@@ -252,13 +263,174 @@ export function InventoryManagement({
   };
 
   // Pre-normalize movements for display and filtering (memoized)
+  // If the user explicitly loads entradas, we store them in `loadedEntradas`
+  // and prefer that source for rendering so the table shows entradas even
+  // when the parent `movements` prop contains other data (e.g., salidas).
+  const [loadedEntradas, setLoadedEntradas] = useState<InventoryMovement[] | null>(null);
+
   const normalizedMovements = useMemo(() => {
-    return (movements || []).map((m) => normalizeMovement(m)).filter(Boolean) as InventoryMovement[];
-  }, [movements]);
+    // If the user explicitly loaded entradas, prefer those for entrada rows
+    // but keep any existing salidas from the parent `movements` prop so they
+    // don't disappear when the user reloads entradas. Merge by id to avoid
+    // duplicates (favor loadedEntradas for entrada rows).
+    if (loadedEntradas && Array.isArray(loadedEntradas)) {
+      const entradasNorm = loadedEntradas.map((m) => normalizeMovement(m)).filter(Boolean) as InventoryMovement[];
+      const movimientosNorm = (movements || []).map((m) => normalizeMovement(m)).filter(Boolean) as InventoryMovement[];
+      // Keep salidas from movimientosNorm that are not present in entradasNorm
+      const entradasIds = new Set(entradasNorm.map((e) => String(e.id)));
+      const salidasOnly = movimientosNorm.filter((mm) => ((mm.type || '').toString().toLowerCase() === 'salida') && !entradasIds.has(String(mm.id)));
+      return [...entradasNorm, ...salidasOnly];
+    }
+
+    const source = movements || [];
+    return (source || []).map((m) => normalizeMovement(m)).filter(Boolean) as InventoryMovement[];
+  }, [movements, loadedEntradas]);
 
   // Split movements into entradas / salidas for easier rendering
   const entradas = normalizedMovements.filter((m) => (m.type || '').toString().toLowerCase() === 'entrada');
   const salidas = normalizedMovements.filter((m) => (m.type || '').toString().toLowerCase() === 'salida');
+
+  // Debug: surface counts to help diagnose missing entradas
+  useEffect(() => {
+    try {
+      console.debug('InventoryManagement debug:', {
+        totalRaw: movements?.length ?? 0,
+        normalizedCount: normalizedMovements.length,
+        entradasCount: entradas.length,
+        salidasCount: salidas.length,
+        activeView,
+        sampleNormalized: normalizedMovements.slice(0, 5),
+      });
+    } catch (e) {
+      // ignore
+    }
+  }, [movements, normalizedMovements, activeView]);
+
+  // Load entradas on mount if there are no movements provided yet
+  useEffect(() => {
+    // Ensure the parent has movements loaded (salidas etc). If the parent
+    // didn't provide movements, fetch them so salidas show automatically.
+    if (!movements || movements.length === 0) {
+      // fire-and-forget; keep UI responsive
+      (async () => {
+        try {
+          await loadMovements();
+        } catch (e) {
+          console.debug('initial loadMovements failed', e);
+        }
+        // also attempt to fetch entradas to prefer them (best-effort)
+        try {
+          await loadEntradas(false);
+        } catch (e) {
+          /* ignore */
+        }
+      })();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Debug JSON viewers for entradas
+  const [entradasJson, setEntradasJson] = useState<string | null>(null);
+  const [rawEntradasJson, setRawEntradasJson] = useState<string | null>(null);
+  const [loadingEntradasJson, setLoadingEntradasJson] = useState(false);
+  const [loadingRawEntradasJson, setLoadingRawEntradasJson] = useState(false);
+  const [loadingEntradasLoad, setLoadingEntradasLoad] = useState(false);
+
+  const fetchEntradasJson = async () => {
+    try {
+      setLoadingEntradasJson(true);
+      const { getEntradas } = await import('../lib/api');
+      const e = await getEntradas();
+      setEntradasJson(JSON.stringify(e || [], null, 2));
+    } catch (err) {
+      console.error('fetchEntradasJson error', err);
+      setEntradasJson(`Error: ${(err as any)?.message || String(err)}`);
+    } finally {
+      setLoadingEntradasJson(false);
+    }
+  };
+
+  const fetchRawEntradasJson = async () => {
+    try {
+      setLoadingRawEntradasJson(true);
+      const { getRawEntradas } = await import('../lib/api');
+      const r = await getRawEntradas();
+      setRawEntradasJson(JSON.stringify(r || [], null, 2));
+    } catch (err) {
+      console.error('fetchRawEntradasJson error', err);
+      setRawEntradasJson(`Error: ${(err as any)?.message || String(err)}`);
+    } finally {
+      setLoadingRawEntradasJson(false);
+    }
+  };
+
+  // Load entradas and populate parent movements state so the table shows them
+  const loadEntradas = async (showToast = false) => {
+    try {
+      setLoadingEntradasLoad(true);
+      const { getEntradas } = await import('../lib/api');
+      const rows = await getEntradas();
+      // normalize each row via local normalizer to ensure consistent shape
+      let normalized = (rows || []).map((r: any) => normalizeMovement(r)).filter(Boolean) as InventoryMovement[];
+      // Ensure productName/sku are present by falling back to local products list
+      normalized = normalized.map((nm) => {
+        if ((!nm.productName || nm.productName === '') && nm.productId) {
+          const p = products.find((pp) => String(pp.id) === String(nm.productId));
+          if (p) {
+            return { ...nm, productName: p.name || '', sku: nm.sku || p.sku || '' };
+          }
+        }
+        return nm;
+      });
+      // Store loaded entradas locally so the UI prefers them when rendering
+      setLoadedEntradas(normalized);
+
+      // Merge entradas with existing salidas to avoid removing salidas that
+      // the parent component provided. We favor the freshly-loaded entradas
+      // for entrada rows and keep any salidas that are not duplicated.
+      try {
+        const existingNorm = (movements || []).map((m) => normalizeMovement(m)).filter(Boolean) as InventoryMovement[];
+        const entradasIds = new Set(normalized.map((e) => String(e.id)));
+        const salidasOnly = existingNorm.filter((mm) => ((mm.type || '').toString().toLowerCase() === 'salida') && !entradasIds.has(String(mm.id)));
+        const merged = [...normalized, ...salidasOnly];
+        onMovementsChange(merged);
+        if (showToast) toast.success('Entradas cargadas');
+      } catch (err) {
+        console.debug('onMovementsChange error when loading entradas', err);
+      }
+    } catch (err) {
+      console.error('loadEntradas error', err);
+      if (showToast) toast.error((err as any)?.message || 'Error cargando entradas');
+    } finally {
+      setLoadingEntradasLoad(false);
+    }
+  };
+
+  // Load general movements (salidas + entradas) and populate parent state.
+  // This is called on mount when the parent didn't provide movements so
+  // salidas are loaded automatically.
+  const loadMovements = async (showToast = false) => {
+    try {
+      const { getMovements } = await import('../lib/api');
+      const rows = await getMovements();
+      let normalized = (rows || []).map((r: any) => normalizeMovement(r)).filter(Boolean) as InventoryMovement[];
+      // Enrich missing product info from local products list
+      normalized = normalized.map((nm) => {
+        if ((!nm.productName || nm.productName === '') && nm.productId) {
+          const p = products.find((pp) => String(pp.id) === String(nm.productId));
+          if (p) return { ...nm, productName: p.name || '', sku: nm.sku || p.sku || '' };
+        }
+        return nm;
+      });
+      onMovementsChange(normalized);
+      if (showToast) toast.success('Movimientos cargados');
+      return normalized;
+    } catch (err) {
+      console.error('loadMovements error', err);
+      if (showToast) toast.error((err as any)?.message || 'Error cargando movimientos');
+      return [] as InventoryMovement[];
+    }
+  };
 
   // Enrich salidas that already include detalles in their payload by expanding them
   // into a flattened list so the table can render a parent row followed by detail rows.
@@ -367,6 +539,43 @@ export function InventoryManagement({
 
   return (
     <div className="space-y-6">
+      {/* KPI cards: Entradas y Salidas — larger side-by-side cards */}
+<div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+
+            <Card className="rounded-xl">
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-gray-600">Total Entradas</p>
+                    <p className="text-3xl mt-1 font-bold text-green-700">{entradas.length}</p>
+                  </div>
+                  <div className="p-3 bg-green-50 rounded-lg">
+                  <TrendingUp className="h-7 w-7 text-green-600" />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+
+            <Card className="rounded-xl">
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-gray-600">Total Salidas</p>
+                    <p className="text-3xl mt-1 text-red-700 font-bold">{salidas.length}</p>
+                  </div>
+                  <div className="p-3 bg-red-50 rounded-lg">
+                  <TrendingDown className="h-7 w-7 text-red-600" />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+
+        {/* keep grid sizing consistent */}
+        <div className="hidden md:block" />
+      </div>
+      
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
@@ -375,20 +584,25 @@ export function InventoryManagement({
               <CardDescription>Registra entradas y revisa salidas</CardDescription>
             </div>
             <div className="flex items-center gap-4">
-              <Tabs value={activeView} onValueChange={(v) => setActiveView(v as 'entradas' | 'salidas')}>
+              <Tabs value={activeView} onValueChange={(v: string) => setActiveView(v as 'entradas' | 'salidas')}>
                 <TabsList className="rounded-lg">
                   <TabsTrigger value="entradas" className="rounded-lg">Entradas</TabsTrigger>
                   <TabsTrigger value="salidas" className="rounded-lg">Salidas</TabsTrigger>
                 </TabsList>
               </Tabs>
               {activeView === 'entradas' ? (
-                <Button
-                  onClick={handleOpenDialog}
-                  className="rounded-lg bg-blue-600 hover:bg-blue-700"
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Registrar Entrada
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" onClick={() => loadEntradas(true)} disabled={loadingEntradasLoad}>
+                    {loadingEntradasLoad ? 'Cargando...' : 'Recargar entradas'}
+                  </Button>
+                  <Button
+                    onClick={handleOpenDialog}
+                    className="rounded-lg bg-blue-600 hover:bg-blue-700"
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Registrar Entrada
+                  </Button>
+                </div>
               ) : null}
             </div>
           </div>

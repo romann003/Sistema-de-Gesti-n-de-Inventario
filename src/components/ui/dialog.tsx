@@ -59,7 +59,7 @@ function DialogContent({
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
-          "bg-background data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 fixed top-[50%] left-[50%] z-50 grid w-[calc(100%-2rem)] max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-6 rounded-xl border p-8 shadow-2xl duration-200 sm:max-w-2xl sm:w-full",
+          "bg-background data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 fixed top-[50%] left-[50%] z-50 grid w-[calc(100%-2rem)] max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-6 rounded-xl border p-8 shadow-2xl duration-200 sm:max-w-2xl sm:w-full max-h-[80vh] overflow-hidden",
           className,
         )}
         {...props}
@@ -79,7 +79,7 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="dialog-header"
       className={cn(
-        "flex flex-col gap-2 text-left pb-4 border-b border-gray-100",
+        "flex flex-col gap-2 text-left pb-4 border-b border-gray-100 sticky",
         className,
       )}
       {...props}
@@ -92,9 +92,10 @@ function DialogFooter({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="dialog-footer"
       className={cn(
-        // stacked on small screens, row on larger; add extra top spacing and
-        // bottom padding so action buttons don't sit flush with modal edges
-        "flex flex-col-reverse gap-3 sm:flex-row sm:justify-end pt-6 border-t mt-4 pb-6",
+        // stacked on small screens, row on larger; make the footer sticky so
+        // action buttons stay visible while the dialog content scrolls.
+        // We keep border and spacing so it looks like a separated footer.
+        "flex flex-col-reverse gap-3 sm:flex-row sm:justify-end pt-6 border-t mt-4 pb-6 sticky bottom-0 bg-background z-10",
         className,
       )}
       {...props}

@@ -1217,14 +1217,15 @@ export function CustomersAndSales({
 
       {/* Product picker modal */}
       <Dialog open={isProductPickerOpen} onOpenChange={setIsProductPickerOpen}>
-        <DialogContent className="w-full max-w-3xl rounded-xl p-4">
+        {/* Allow dialog content to scroll when product list is long */}
+        <DialogContent className="w-full sm:max-w-3xl rounded-xl overflow-y-auto max-h-[90vh] p-6">
           <DialogHeader>
             <DialogTitle>Seleccionar producto</DialogTitle>
             <DialogDescription>Elige un producto, ajusta precio y cantidad, y confírmalo para añadir a la venta.</DialogDescription>
           </DialogHeader>
 
           <div className="mt-2">
-            <div className="max-h-56 overflow-y-auto border rounded">
+            <div className="h-[50vh] overflow-y-auto border rounded">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -1300,7 +1301,7 @@ export function CustomersAndSales({
             </div>
           </div>
 
-          <DialogFooter className="mt-4">
+          <DialogFooter className="mt-4 ">
             <Button variant="outline" onClick={() => setIsProductPickerOpen(false)}>Cancelar</Button>
             <Button disabled={!pickerProductId} variant="outline" onClick={() => {
               // Add picked product to table but keep modal open

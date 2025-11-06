@@ -7,6 +7,10 @@ export function createClient() {
   if (!supabaseClient) {
     const supabaseUrl = `https://${projectId}.supabase.co`;
     
+    // Include the public anon key as both 'apikey' and Authorization Bearer so
+    // requests made directly to the REST endpoint (or by the SDK's fetch) have
+    // the expected header. It's safe to expose the public anon key in frontend
+    // code.
     supabaseClient = createSupabaseClient(supabaseUrl, publicAnonKey, {
       auth: {
         autoRefreshToken: true,
@@ -16,6 +20,8 @@ export function createClient() {
       global: {
         headers: {
           'Content-Type': 'application/json',
+          'apikey': publicAnonKey,
+          'Authorization': `Bearer ${publicAnonKey}`,
         },
       },
     });
