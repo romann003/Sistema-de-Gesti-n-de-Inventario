@@ -203,6 +203,88 @@ export function EnhancedDashboard({
     }
   };
 
+  // Compute dynamic quality metrics from available data (falls back to provided qualityMetrics)
+  const computeQualityMetrics = (): QualityMetric[] => {
+    const qm: QualityMetric[] = [];
+
+    // Helper for status thresholds
+    const pctStatus = (value: number, target: number) => {
+      const pct = target === 0 ? 100 : (value / target) * 100;
+      if (pct >= 120) return 'excellent' as const;
+      if (pct >= 100) return 'good' as const;
+      if (pct >= 50) return 'warning' as const;
+      return 'critical' as const;
+    };
+
+    // Rendimiento: ventas diarias promedio (últimos 7 días)
+    try {
+      const last7 = Array.from({ length: 7 }, (_, i) => {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        return d;
+      });
+      const salesPerDay = last7.map((day) => {
+        const key = toLocalDateKey(day);
+        const total = (sales || []).filter((s) => toLocalDateKey(new Date(s.date)) === key).reduce((s, it) => s + safeNumber(it.total), 0);
+        return total;
+      });
+      const avgSales = Math.round(salesPerDay.reduce((s, v) => s + v, 0) / 7);
+      const salesTarget = Math.max(1, Math.round(avgSales * 1.2) || 10);
+      qm.push({ category: 'Rendimiento', metric: 'Ventas diarias promedio', value: avgSales, target: salesTarget, unit: 'MXN/día', status: pctStatus(avgSales, salesTarget) });
+
+      // Movimientos promedio por día (entradas+salidas)
+      const movesPerDay = last7.map((day) => {
+        const key = toLocalDateKey(day);
+        const total = (movements || []).filter((m) => {
+          const d = (m as any).date ? new Date((m as any).date) : ((m as any)._raw?.fecha ? new Date((m as any)._raw.fecha) : null);
+          return d ? toLocalDateKey(d) === key : false;
+        }).length;
+        return total;
+      });
+      const avgMoves = Math.round(movesPerDay.reduce((s, v) => s + v, 0) / 7);
+      const movesTarget = Math.max(1, Math.round(avgMoves * 1.2) || 20);
+      qm.push({ category: 'Rendimiento', metric: 'Movimientos diarios (prom.)', value: avgMoves, target: movesTarget, unit: 'mov/día', status: pctStatus(avgMoves, movesTarget) });
+    } catch (e) {
+      // ignore compute errors
+    }
+
+    // Fiabilidad: % productos con stock >= minStock
+    try {
+      const totalProducts = products.length || 0;
+      const healthy = products.filter((p) => getCurrentStock(p) >= getMinStock(p)).length;
+      const healthyPct = totalProducts === 0 ? 100 : Math.round((healthy / totalProducts) * 100);
+      qm.push({ category: 'Fiabilidad', metric: 'Productos con stock suficiente', value: healthyPct, target: 95, unit: '%', status: pctStatus(healthyPct, 95) });
+
+      const stockouts = totalProducts - healthy;
+      const stockoutTarget = 0;
+      const stockoutStatus = stockouts === 0 ? 'excellent' : (stockouts <= Math.max(1, Math.round(totalProducts * 0.02)) ? 'good' : (stockouts <= Math.max(3, Math.round(totalProducts * 0.05)) ? 'warning' : 'critical'));
+      qm.push({ category: 'Fiabilidad', metric: 'Productos con stock bajo', value: stockouts, target: stockoutTarget, unit: 'items', status: stockoutStatus });
+    } catch (e) {}
+
+    // Usabilidad: % productos con proveedores asignados
+    try {
+      const totalProducts = products.length || 0;
+      const withSuppliers = products.filter((p) => Array.isArray(p.supplierIds) && p.supplierIds.length > 0).length;
+      const withSuppliersPct = totalProducts === 0 ? 100 : Math.round((withSuppliers / totalProducts) * 100);
+      qm.push({ category: 'Usabilidad', metric: 'Productos con proveedor', value: withSuppliersPct, target: 90, unit: '%', status: pctStatus(withSuppliersPct, 90) });
+
+      // Inventario rotación general (un proxy): unidades vendidas / unidades en stock
+      const totalStock = products.reduce((s, p) => s + getCurrentStock(p), 0);
+      const totalSold = movements.filter((m) => (String((m as any).type || (m as any).tipo || '').toLowerCase().includes('salida'))).reduce((s, m) => s + safeNumber((m as any).quantity ?? (m as any).cantidad ?? 0), 0);
+      const turnover = totalStock === 0 ? 0 : Math.round((totalSold / totalStock) * 100);
+      qm.push({ category: 'Usabilidad', metric: 'Rotación (proxy)', value: turnover, target: 20, unit: '%', status: pctStatus(turnover, 20) });
+    } catch (e) {}
+
+    // Append any user-provided metrics after dynamic ones (preserve custom configs)
+    if (qualityMetrics && qualityMetrics.length > 0) {
+      return [...qm, ...qualityMetrics];
+    }
+
+    return qm;
+  };
+
+  const computedMetrics = computeQualityMetrics();
+
   const cardVariants = {
     hidden: { opacity: 0, y: 20 },
     visible: { opacity: 1, y: 0 },
@@ -485,7 +567,7 @@ export function EnhancedDashboard({
                     initial={{ opacity: 0, x: -20 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ duration: 0.3, delay: index * 0.1 }}
-                    className="p-4 border rounded-lg bg-gradient-to-br from-orange-50 to-white border-orange-200 hover:shadow-md transition-shadow"
+                          className="p-4 border rounded-lg bg-gradient-to-br from-orange-50 to-white border-orange-200 hover:shadow-md transition-shadow"
                   >
                     <div className="flex items-start justify-between mb-2">
                       <div className="flex-1">

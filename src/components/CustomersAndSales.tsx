@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
@@ -92,6 +92,7 @@ export function CustomersAndSales({
   const [pickerQuantity, setPickerQuantity] = useState<number>(1);
   const [pickerUnitPrice, setPickerUnitPrice] = useState<number>(0);
   const [pickerTargetIndex, setPickerTargetIndex] = useState<number | null>(null);
+  const [pickerSearchQuery, setPickerSearchQuery] = useState<string>('');
 
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -591,6 +592,18 @@ export function CustomersAndSales({
     return !saleItems.some((it) => it.productId === p.id && it.productId !== '');
   });
 
+  const filteredAvailableProducts = useMemo(() => {
+    const q = (pickerSearchQuery || '').trim().toLowerCase();
+    if (!q) return availableProductsForPicker;
+    return availableProductsForPicker.filter((p) => {
+      return (
+        (p.name || '').toLowerCase().includes(q) ||
+        (p.sku || '').toLowerCase().includes(q) ||
+        String(p.id).toLowerCase().includes(q)
+      );
+    });
+  }, [availableProductsForPicker, pickerSearchQuery]);
+
   return (
     <div className="space-y-6">
       <div>
@@ -998,7 +1011,6 @@ export function CustomersAndSales({
                     phone: editingCustomer.phone,
                     address: editingCustomer.address || undefined,
                     status: editingCustomer.status,
-                    totalPurchases: editingCustomer.totalPurchases,
                   }} />
 
                   <div className="mt-4 flex justify-end">
@@ -1230,23 +1242,37 @@ export function CustomersAndSales({
           </DialogHeader>
 
           <div className="mt-2">
+            <div className="mb-3">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <Input
+                  placeholder="Buscar producto por nombre o SKU..."
+                  value={pickerSearchQuery}
+                  onChange={(e) => setPickerSearchQuery(e.target.value)}
+                  className="pl-10 rounded-lg"
+                />
+              </div>
+            </div>
+
             <div className="h-[50vh] overflow-y-auto border rounded">
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Producto</TableHead>
+                    <TableHead>SKU</TableHead>
                     <TableHead className="text-right">Precio</TableHead>
                     <TableHead className="text-right">Stock</TableHead>
                     <TableHead className="text-right">Acción</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {availableProductsForPicker.map((p) => (
+                  {filteredAvailableProducts.map((p) => (
                     <TableRow key={p.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => {
                       setPickerProductId(p.id);
                       setPickerUnitPrice(p.unitPrice || 0);
                     }}>
                       <TableCell>{p.name}</TableCell>
+                      <TableCell className="text-sm text-gray-500">{p.sku || '—'}</TableCell>
                       <TableCell className="text-right">${(p.unitPrice || 0).toFixed(2)}</TableCell>
                       <TableCell className="text-right">{p.currentStock}</TableCell>
                       <TableCell className="text-right">
@@ -1256,7 +1282,12 @@ export function CustomersAndSales({
                   ))}
                   {availableProductsForPicker.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={4} className="text-center text-sm text-gray-500 py-4">Todos los productos disponibles ya fueron añadidos a la venta.</TableCell>
+                      <TableCell colSpan={5} className="text-center text-sm text-gray-500 py-4">Todos los productos disponibles ya fueron añadidos a la venta.</TableCell>
+                    </TableRow>
+                  )}
+                  {availableProductsForPicker.length > 0 && filteredAvailableProducts.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={5} className="text-center text-sm text-gray-500 py-4">No se encontraron productos que coincidan con la búsqueda.</TableCell>
                     </TableRow>
                   )}
                 </TableBody>
