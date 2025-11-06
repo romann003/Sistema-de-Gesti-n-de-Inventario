@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generador de Hashes SHA-256</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        input, button {
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            cursor: pointer;
+            border: none;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        .result {
+            background: #e8f5e9;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
+            word-break: break-all;
+            font-family: monospace;
+        }
+        .presets {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            margin: 20px 0;
+        }
+        .preset-btn {
+            padding: 8px;
+            background: #2196F3;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Generador de Hashes SHA-256</h1>
+        <p>Herramienta para generar hashes de contraseñas para el sistema de inventario</p>
+        
+        <div class="presets">
+            <button class="preset-btn" onclick="generateHash('admin123')">admin123</button>
+            <button class="preset-btn" onclick="generateHash('empleado123')">empleado123</button>
+            <button class="preset-btn" onclick="generateHash('maria123')">maria123</button>
+            <button class="preset-btn" onclick="generateHash('carlos123')">carlos123</button>
+            <button class="preset-btn" onclick="generateHash('ana123')">ana123</button>
+        </div>
+        
+        <input type="text" id="password" placeholder="Ingresa una contraseña...">
+        <button onclick="generateHash()">Generar Hash</button>
+        
+        <div id="result" class="result" style="display:none;">
+            <strong>Hash SHA-256:</strong><br>
+            <span id="hash"></span>
+        </div>
+        
+        <div id="allHashes" style="margin-top: 20px; display: none;">
+            <h3>Hashes para SQL:</h3>
+            <pre id="sqlHashes" style="background: #f0f0f0; padding: 15px; border-radius: 5px; overflow-x: auto;"></pre>
+        </div>
+    </div>
+
+    <script>
+        async function generateHash(preset) {
+            const password = preset || document.getElementById('password').value;
+            if (!password) {
+                alert('Por favor ingresa una contraseña');
+                return;
+            }
+            
+            document.getElementById('password').value = password;
+            
+            const encoder = new TextEncoder();
+            const data = encoder.encode(password);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+            
+            document.getElementById('hash').textContent = hashHex;
+            document.getElementById('result').style.display = 'block';
+        }
+        
+        async function generateAllHashes() {
+            const passwords = {
+                'admin@inventario.com': 'admin123',
+                'empleado@inventario.com': 'empleado123',
+                'maria@inventario.com': 'maria123',
+                'carlos@inventario.com': 'carlos123',
+                'ana@inventario.com': 'ana123'
+            };
+            
+            let sql = 'INSERT INTO usuarios (correo, password, nombre, rol, activo) VALUES\n';
+            const names = {
+                'admin@inventario.com': ['Administrador Principal', 'Administrador'],
+                'empleado@inventario.com': ['Empleado de Prueba', 'Empleado'],
+                'maria@inventario.com': ['María González', 'Administrador'],
+                'carlos@inventario.com': ['Carlos Ramírez', 'Empleado'],
+                'ana@inventario.com': ['Ana López', 'Empleado']
+            };
+            
+            const lines = [];
+            for (const [email, password] of Object.entries(passwords)) {
+                const encoder = new TextEncoder();
+                const data = encoder.encode(password);
+                const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+                const hashArray = Array.from(new Uint8Array(hashBuffer));
+                const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+                
+                const [name, role] = names[email];
+                lines.push(`  ('${email}', '${hashHex}', '${name}', '${role}', TRUE)`);
+            }
+            
+            sql += lines.join(',\n');
+            sql += '\nON CONFLICT (correo) DO NOTHING;';
+            
+            document.getElementById('sqlHashes').textContent = sql;
+            document.getElementById('allHashes').style.display = 'block';
+        }
+        
+        // Generate all hashes on load
+        window.onload = generateAllHashes;
+    </script>
+</body>
+</html>
