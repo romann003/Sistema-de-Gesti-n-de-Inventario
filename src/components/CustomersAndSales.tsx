@@ -1444,7 +1444,7 @@ export function CustomersAndSales({
 
       {/* Dialog: Sale Details (opened from 'Ver detalles' button in sales table) */}
       <Dialog open={isSaleDetailOpen} onOpenChange={setIsSaleDetailOpen}>
-        <DialogContent className="w-full max-w-3xl rounded-xl p-4">
+        <DialogContent className="w-full sm:max-w-3xl rounded-xl max-h-[90vh] overflow-y-auto ">
             <DialogHeader>
               <DialogTitle>Factura de Venta</DialogTitle>
               <DialogDescription>Vista detallada de la venta con formato de factura</DialogDescription>
@@ -1540,7 +1540,7 @@ export function CustomersAndSales({
 
                   <div className="mt-6 flex justify-end gap-2">
                     <Button variant="outline" onClick={() => setIsSaleDetailOpen(false)} className="rounded-lg">Cerrar</Button>
-                    <Button className="rounded-lg bg-green-600 hover:bg-green-700" onClick={() => window.print()}>Imprimir</Button>
+                    {/* Print button removed as requested */}
                   </div>
                 </div>
               ) : (

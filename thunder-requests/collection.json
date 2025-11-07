@@ -1,0 +1,25 @@
+{
+  "_type": "collection",
+  "name": "Local API examples",
+  "requests": [
+    {
+      "name": "Get products",
+      "request": {
+        "url": "{{baseUrl}}/api/products",
+        "method": "GET",
+        "headers": []
+      }
+    },
+    {
+      "name": "Get customers",
+      "request": {
+        "url": "{{baseUrl}}/api/customers",
+        "method": "GET",
+        "headers": []
+      }
+    }
+  ],
+  "_variables": [
+    { "key": "baseUrl", "value": "http://localhost:5173" }
+  ]
+}

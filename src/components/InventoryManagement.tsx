@@ -1378,10 +1378,7 @@ export function InventoryManagement({
                   <p className="text-sm">{(movementDetails.saleNotes && movementDetails.saleNotes !== '') ? movementDetails.saleNotes : (movementDetails.notes || '—')}</p>
                 </div>
 
-                <div className="flex gap-2 justify-end">
-                  <Button variant="outline" onClick={() => window.print()} className="rounded-lg">Imprimir</Button>
-                  <Button onClick={() => { navigator.clipboard?.writeText(JSON.stringify(movementDetails._raw || movementDetails)); toast.success('Copiado al portapapeles'); }} className="rounded-lg">Exportar</Button>
-                </div>
+                {/* Removed print/export buttons as requested */}
               </div>
             ) : (
               <p className="text-sm text-gray-500">Cargando...</p>
