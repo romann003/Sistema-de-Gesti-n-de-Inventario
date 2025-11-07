@@ -1,7 +1,10 @@
 
   # Sistema de Gestión de Inventario
 
-  This is a code bundle for Sistema de Gestión de Inventario. The original project is available at https://www.figma.com/design/BmIbw47Qzuj2WFwKrYEcDg/Sistema-de-Gesti%C3%B3n-de-Inventario.
+BRYAN JOSUE ROMAN GARCIA
+5190-21-1202
+ASEGURAMIENTO DE LA CALIAD DEL SOFTWARE
+PROYECTO FINAL - SISTEMA DE GESTION DE INVENTARIO
 
   ## Running the code
 
